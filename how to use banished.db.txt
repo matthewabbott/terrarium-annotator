@@ -1,0 +1,6 @@
+sqlite3 banished.db
+.mode list
+.separator " "
+.output ayylmao.txt
+SELECT post.body FROM post LEFT JOIN tag ON (post.id = tag.post_id) WHERE tag.name = 'story_post' ORDER BY post.time ASC;
+.exit
