@@ -423,6 +423,51 @@ class GlossaryStore:
         except sqlite3.Error as e:
             raise DatabaseError(f"get_by_thread failed: {e}") from e
 
+    def get_tentative_by_thread(self, thread_id: int) -> list[GlossaryEntry]:
+        """
+        Get tentative entries created in a specific thread.
+
+        Args:
+            thread_id: Thread ID to query.
+
+        Returns:
+            List of tentative entries first seen in this thread.
+        """
+        try:
+            cursor = self.conn.execute(
+                """
+                SELECT id, term, term_normalized, definition, status,
+                       first_seen_post_id, first_seen_thread_id,
+                       last_updated_post_id, last_updated_thread_id,
+                       created_at, updated_at
+                FROM glossary_entry
+                WHERE first_seen_thread_id = ? AND status = 'tentative'
+                ORDER BY term_normalized
+                """,
+                (thread_id,),
+            )
+            entries = []
+            for row in cursor:
+                entries.append(
+                    GlossaryEntry(
+                        id=row["id"],
+                        term=row["term"],
+                        term_normalized=row["term_normalized"],
+                        definition=row["definition"],
+                        status=row["status"],
+                        tags=self._get_tags(row["id"]),
+                        first_seen_post_id=row["first_seen_post_id"],
+                        first_seen_thread_id=row["first_seen_thread_id"],
+                        last_updated_post_id=row["last_updated_post_id"],
+                        last_updated_thread_id=row["last_updated_thread_id"],
+                        created_at=row["created_at"],
+                        updated_at=row["updated_at"],
+                    )
+                )
+            return entries
+        except sqlite3.Error as e:
+            raise DatabaseError(f"get_tentative_by_thread failed: {e}") from e
+
     def _get_tags(self, entry_id: int) -> list[str]:
         """Fetch tags for an entry."""
         cursor = self.conn.execute(

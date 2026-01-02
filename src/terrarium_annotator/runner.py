@@ -18,6 +18,7 @@ from terrarium_annotator.context import (
     TOOL_SYSTEM_PROMPT,
 )
 from terrarium_annotator.corpus import CorpusReader, SceneBatcher
+from terrarium_annotator.curator import CuratorFork
 from terrarium_annotator.storage import GlossaryStore, ProgressTracker, RevisionHistory
 from terrarium_annotator.tools import ToolDispatcher
 
@@ -44,6 +45,8 @@ class RunnerConfig:
     context_budget: int = 16000
     trigger_ratio: float = 0.80
     target_ratio: float = 0.70
+    # Curator settings (F6)
+    enable_curator: bool = True
 
 
 @dataclass
@@ -121,6 +124,14 @@ class AnnotationRunner:
         )
         self.compaction_state = CompactionState()
 
+        # Curator (F6)
+        self.curator = CuratorFork(
+            glossary=self.glossary,
+            corpus=self.corpus,
+            revisions=self.revisions,
+            agent=self.agent,
+        )
+
     def close(self) -> None:
         """Close all database connections."""
         self.glossary.close()
@@ -173,6 +184,22 @@ class AnnotationRunner:
                     # Track for compaction (F5)
                     self.compaction_state.completed_thread_ids.append(current_thread_id)
                     LOGGER.info("Thread %d completed", current_thread_id)
+
+                    # Run curator evaluation (F6)
+                    if self.config.enable_curator:
+                        try:
+                            curator_result = self.curator.run(current_thread_id)
+                            if curator_result.entries_evaluated > 0:
+                                LOGGER.info(
+                                    "Curator: %d evaluated, %d confirmed, %d rejected, %d merged, %d revised",
+                                    curator_result.entries_evaluated,
+                                    curator_result.confirmed,
+                                    curator_result.rejected,
+                                    curator_result.merged,
+                                    curator_result.revised,
+                                )
+                        except Exception as e:
+                            LOGGER.warning("Curator evaluation failed: %s", e)
 
                 current_thread_id = scene.thread_id
                 self.progress.update_thread_state(

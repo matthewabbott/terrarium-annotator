@@ -11,7 +11,7 @@
 | **F3.5: Documentation & Logging** | :white_check_mark: Complete | Docstrings + basic logging |
 | **F4: Runner MVP** | :white_check_mark: Complete | Scene-based iteration + tool call loop + 18 tests |
 | **F5: Compaction** | :white_check_mark: Complete | ThreadSummarizer + ContextCompactor + 29 tests |
-| F6: Curator | 🔴 Not Started | End-of-thread fork workflow |
+| **F6: Curator** | :white_check_mark: Complete | CuratorFork + decision parsing + 19 tests |
 | F7: Snapshots | 🔴 Not Started | Save/load/summon + CASCADE fix |
 | F8: Exporters | 🔴 Not Started | JSON/YAML export |
 
@@ -167,6 +167,16 @@ The existing `codex.py` uses JSON. We will:
 - F4 (thread boundary detection)
 - F0 (revision logging)
 
+### Acceptance Criteria
+
+- [x] CuratorFork evaluates tentative entries at thread completion
+- [x] CONFIRM/REJECT/MERGE/REVISE decisions implemented
+- [x] Decisions logged to revision history
+- [x] REJECT deletes entries from glossary
+- [x] MERGE combines entries and deletes source
+- [x] Conservative fallback (default to CONFIRM on errors)
+- [x] All tests pass (19 tests)
+
 ---
 
 ## Feature 7: Snapshots
@@ -204,7 +214,7 @@ The existing `codex.py` uses JSON. We will:
 
 ## Current Focus
 
-**Feature 6: Curator** is the next priority.
+**Feature 7: Snapshots** is the next priority.
 
 Completed:
 - F0 (Storage Layer) - 2026-01-02
@@ -214,6 +224,7 @@ Completed:
 - F3.5 (Documentation & Logging) - 2026-01-02
 - F4 (Runner MVP) - 2026-01-02
 - F5 (Compaction) - 2026-01-02
+- F6 (Curator) - 2026-01-02
 
 See `docs/worklog/` for session notes.
 
