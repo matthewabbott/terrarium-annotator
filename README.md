@@ -30,6 +30,7 @@ Useful flags:
 All harness artifacts live under `data/`:
 - `data/codex.json` – accumulated codex entries.
 - `data/state.json` – last processed post id (safe to delete to restart from scratch).
+- See `docs/ROADMAP.md` for the in-progress feature checklist (context summarization, codex graph, checkpoints, manual forks, etc.).
 
 ## Current Status
 

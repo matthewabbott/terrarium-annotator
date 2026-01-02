@@ -21,3 +21,49 @@ Write imperative, concise commit subjects similar to the existing history (`Add 
 
 ## Security & Configuration Tips
 Treat `banished.db` as read-only; create derived files under `data/tmp/` and add them to `.gitignore`. Do not commit API keys—load provider credentials from environment variables or `.env` files ignored by git. When introducing new configuration knobs, document the default in `README.md` and supply a safe fallback so the CLI can start without secrets.
+
+## Agent Workflow
+
+This section guides AI agents working on the codebase across context windows.
+
+### Starting a Session
+
+1. Read `docs/ONBOARDING.md` - follow the checklist
+2. Check `docs/ROADMAP.md` - identify current feature in progress
+3. Read recent `docs/worklog/` entries - understand context from previous sessions
+4. Create your own worklog file before coding: `docs/worklog/YYYY-MM-DD-brief-description.md`
+
+### During Development
+
+- **Modularity first**: Each module should have a single clear purpose
+- **Interface-driven**: Check `docs/INTERFACES.md` before implementing a component
+- **Document decisions**: If you make a non-obvious choice, note it in your worklog
+- **Test as you go**: Mirror source structure in `tests/`
+- **Check contracts**: Reference `docs/INTERFACES.md` for method signatures and behaviors
+
+### Ending a Session
+
+1. Update your worklog with what you accomplished
+2. Note any open questions or blockers for the next agent
+3. Suggest concrete next steps
+4. Run tests and document results
+5. Update `docs/ROADMAP.md` if you completed a feature checkpoint
+
+### Key Principles
+
+1. **Future agents will read your code**: Write for clarity, not cleverness
+2. **Context is precious**: Document *why*, not just *what*
+3. **Small commits**: Each should be a logical unit with a clear purpose
+4. **Don't break the build**: Run tests before finishing
+5. **Leave breadcrumbs**: Your worklog entry is a gift to the next agent
+
+### Documentation Hierarchy
+
+When seeking information, consult in this order:
+1. `SPEC.md` - What are we building and why?
+2. `docs/ARCHITECTURE.md` - How do components fit together?
+3. `docs/INTERFACES.md` - What are the exact method signatures?
+4. `docs/SCHEMA.md` - What's the database structure?
+5. `docs/ROADMAP.md` - What's the current focus?
+6. `docs/worklog/` - What happened recently?
+7. `docs/adr/` - Why were certain decisions made?
