@@ -14,3 +14,24 @@ class ThreadSummary:
     summary_text: str
     entries_created: list[int] = field(default_factory=list)
     entries_updated: list[int] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        """Serialize to dict for snapshot storage."""
+        return {
+            "thread_id": self.thread_id,
+            "position": self.position,
+            "summary_text": self.summary_text,
+            "entries_created": self.entries_created,
+            "entries_updated": self.entries_updated,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> ThreadSummary:
+        """Reconstruct from snapshot data."""
+        return cls(
+            thread_id=data["thread_id"],
+            position=data["position"],
+            summary_text=data["summary_text"],
+            entries_created=data.get("entries_created", []),
+            entries_updated=data.get("entries_updated", []),
+        )

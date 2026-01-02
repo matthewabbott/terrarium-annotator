@@ -19,7 +19,12 @@ from terrarium_annotator.context import (
 )
 from terrarium_annotator.corpus import CorpusReader, SceneBatcher
 from terrarium_annotator.curator import CuratorFork
-from terrarium_annotator.storage import GlossaryStore, ProgressTracker, RevisionHistory
+from terrarium_annotator.storage import (
+    GlossaryStore,
+    ProgressTracker,
+    RevisionHistory,
+    SnapshotStore,
+)
 from terrarium_annotator.tools import ToolDispatcher
 
 if TYPE_CHECKING:
@@ -47,6 +52,8 @@ class RunnerConfig:
     target_ratio: float = 0.70
     # Curator settings (F6)
     enable_curator: bool = True
+    # Snapshot settings (F7)
+    enable_snapshots: bool = True
 
 
 @dataclass
@@ -85,6 +92,12 @@ class AnnotationRunner:
         self.revisions = RevisionHistory(config.annotator_db_path)
         self.progress = ProgressTracker(config.annotator_db_path)
 
+        # Snapshots (F7)
+        self.snapshots: SnapshotStore | None = None
+        if config.enable_snapshots:
+            self.snapshots = SnapshotStore(config.annotator_db_path)
+        self._thread_position = 0  # Track thread ordinal for snapshots
+
         # Corpus components (F1)
         self.corpus = CorpusReader(config.corpus_db_path)
         self.batcher = SceneBatcher(self.corpus)
@@ -100,6 +113,7 @@ class AnnotationRunner:
             glossary=self.glossary,
             corpus=self.corpus,
             revisions=self.revisions,
+            snapshots=self.snapshots,
         )
 
         # Agent client
@@ -138,6 +152,8 @@ class AnnotationRunner:
         self.revisions.close()
         self.progress.close()
         self.corpus.close()
+        if self.snapshots is not None:
+            self.snapshots.close()
 
     def run(self, limit: int | None = None) -> RunResult:
         """
@@ -201,11 +217,18 @@ class AnnotationRunner:
                         except Exception as e:
                             LOGGER.warning("Curator evaluation failed: %s", e)
 
+                    # Create checkpoint snapshot (F7) - after curator for clean state
+                    self._create_checkpoint(
+                        thread_id=current_thread_id,
+                        last_post_id=scene.first_post_id - 1,  # Last post of completed thread
+                    )
+
                 current_thread_id = scene.thread_id
+                self._thread_position += 1  # Increment for snapshot ordering (F7)
                 self.progress.update_thread_state(
                     current_thread_id, status="in_progress"
                 )
-                LOGGER.info("Starting thread %d", current_thread_id)
+                LOGGER.info("Starting thread %d (position %d)", current_thread_id, self._thread_position)
 
             LOGGER.info(
                 "Processing scene %d-%d (thread %d, %d posts)",
@@ -289,6 +312,35 @@ class AnnotationRunner:
             run_duration_seconds=elapsed,
             final_state=final_state,
         )
+
+    def _create_checkpoint(self, thread_id: int, last_post_id: int) -> None:
+        """
+        Create a checkpoint snapshot after thread completion.
+
+        Args:
+            thread_id: Completed thread ID.
+            last_post_id: Last post ID processed.
+        """
+        if self.snapshots is None:
+            return
+
+        try:
+            snapshot_id = self.snapshots.create(
+                snapshot_type="checkpoint",
+                last_post_id=last_post_id,
+                last_thread_id=thread_id,
+                thread_position=self._thread_position,
+                context=self.context,
+                compaction_state=self.compaction_state,
+                glossary=self.glossary,
+            )
+            LOGGER.info(
+                "Created checkpoint snapshot %d for thread %d",
+                snapshot_id,
+                thread_id,
+            )
+        except Exception as e:
+            LOGGER.warning("Failed to create checkpoint snapshot: %s", e)
 
     def _search_relevant_entries(self, scene: Scene) -> list[GlossaryEntry]:
         """Search glossary for entries relevant to the scene content."""

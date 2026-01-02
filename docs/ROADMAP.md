@@ -12,7 +12,7 @@
 | **F4: Runner MVP** | :white_check_mark: Complete | Scene-based iteration + tool call loop + 18 tests |
 | **F5: Compaction** | :white_check_mark: Complete | ThreadSummarizer + ContextCompactor + 29 tests |
 | **F6: Curator** | :white_check_mark: Complete | CuratorFork + decision parsing + 19 tests |
-| F7: Snapshots | 🔴 Not Started | Save/load/summon + CASCADE fix |
+| **F7: Snapshots** | :white_check_mark: Complete | SnapshotStore + summon workflow + CASCADE fix + 34 tests |
 | F8: Exporters | 🔴 Not Started | JSON/YAML export |
 
 ---
@@ -181,18 +181,34 @@ The existing `codex.py` uses JSON. We will:
 
 ## Feature 7: Snapshots
 
-**Objective**: Context serialization and rehydration.
+**Objective**: Point-in-time captures of annotation state with read-only summon capability.
 
 ### Scope
 
 1. SnapshotStore implementation
 2. Snapshot entry tracking (blame)
 3. Summon/continue/dismiss workflow
+4. Automatic checkpointing at thread boundaries
+5. CASCADE fix for revision FK
 
 ### Dependencies
 
 - F0 (snapshot tables)
 - F2 (context serialization)
+- F6 (thread completion trigger)
+
+### Acceptance Criteria
+
+- [x] SnapshotStore creates snapshots with context and entry state
+- [x] Automatic checkpoint after curator completes at thread boundary
+- [x] summon_snapshot loads read-only historical view
+- [x] summon_continue records conversation in summoned context
+- [x] summon_dismiss returns to normal operation
+- [x] Write tools (create/update/delete) blocked during summon
+- [x] Migration 004 fixes revision.entry_id CASCADE to SET NULL
+- [x] Context serialization (to_dict/from_dict) for AnnotationContext
+- [x] Context serialization (to_dict/from_dict) for CompactionState
+- [x] All tests pass (34 tests: 20 storage + 14 tools)
 
 ---
 
@@ -214,7 +230,7 @@ The existing `codex.py` uses JSON. We will:
 
 ## Current Focus
 
-**Feature 7: Snapshots** is the next priority.
+**Feature 8: Exporters** is the next priority.
 
 Completed:
 - F0 (Storage Layer) - 2026-01-02
@@ -225,6 +241,7 @@ Completed:
 - F4 (Runner MVP) - 2026-01-02
 - F5 (Compaction) - 2026-01-02
 - F6 (Curator) - 2026-01-02
+- F7 (Snapshots) - 2026-01-02
 
 See `docs/worklog/` for session notes.
 

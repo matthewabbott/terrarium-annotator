@@ -116,6 +116,24 @@ class AnnotationContext:
             conversation_history=copy.deepcopy(self.conversation_history),
         )
 
+    def to_dict(self) -> dict:
+        """Serialize to dict for snapshot storage."""
+        return {
+            "system_prompt": self.system_prompt,
+            "max_turns": self.max_turns,
+            "conversation_history": self.conversation_history,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> AnnotationContext:
+        """Reconstruct from snapshot data."""
+        ctx = cls(
+            system_prompt=data["system_prompt"],
+            max_turns=data.get("max_turns", 12),
+        )
+        ctx.conversation_history = data.get("conversation_history", [])
+        return ctx
+
     def _format_user_payload(
         self,
         scene: Scene,

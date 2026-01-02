@@ -16,6 +16,12 @@ from terrarium_annotator.storage.glossary import (
 )
 from terrarium_annotator.storage.migrations import Migration, get_all_migrations
 from terrarium_annotator.storage.revisions import Revision, RevisionHistory
+from terrarium_annotator.storage.snapshots import (
+    Snapshot,
+    SnapshotContext,
+    SnapshotEntry,
+    SnapshotStore,
+)
 from terrarium_annotator.storage.state import ProgressTracker, RunState, ThreadState
 
 __all__ = [
@@ -39,6 +45,11 @@ __all__ = [
     # Revisions
     "Revision",
     "RevisionHistory",
+    # Snapshots
+    "Snapshot",
+    "SnapshotContext",
+    "SnapshotEntry",
+    "SnapshotStore",
     # State
     "ProgressTracker",
     "RunState",
