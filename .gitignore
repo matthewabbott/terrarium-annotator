@@ -23,4 +23,5 @@ data/
 # Testing
 .pytest_cache/
 .coverage
-htmlcov/
+htmlcov/*.db
+*.db-*

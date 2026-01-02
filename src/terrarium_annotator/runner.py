@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -348,15 +349,19 @@ class AnnotationRunner:
         if not scene.posts:
             return []
 
-        # Combine scene text for search
+        # Combine scene text for search - extract key words only
         scene_text = " ".join(post.body or "" for post in scene.posts[:3])
-        query = scene_text[:200]  # Truncate for FTS query
+        # Sanitize for FTS5: keep only alphanumeric and spaces
+        words = re.findall(r'\b[a-zA-Z]{3,}\b', scene_text)
+        query = " ".join(words[:20])  # Use first 20 words
 
         if not query.strip():
             return []
 
         try:
-            return self.glossary.search(query, limit=10)
+            # Wrap in quotes for safe phrase search
+            safe_query = query.replace('"', '')
+            return self.glossary.search(f'"{safe_query}"', limit=10)
         except Exception as e:
             LOGGER.warning("Glossary search failed: %s", e)
             return []
