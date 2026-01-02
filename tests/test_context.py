@@ -351,72 +351,19 @@ class TestSystemPrompt:
         assert "codex" in SYSTEM_PROMPT.lower()
 
 
-class TestLegacyContext:
-    """Test backwards compatibility with old context.py API."""
+class TestAnnotationContextInit:
+    """Test AnnotationContext initialization."""
 
-    def test_legacy_context_works_without_system_prompt(self):
-        """Legacy AnnotationContext should work without system_prompt arg."""
+    def test_annotation_context_requires_system_prompt(self):
+        """AnnotationContext should require system_prompt."""
         from terrarium_annotator.context import AnnotationContext
-
-        ctx = AnnotationContext(max_turns=5)
-
-        assert ctx.max_turns == 5
-        assert ctx.system_prompt == SYSTEM_PROMPT
-
-    def test_legacy_build_messages_signature(self):
-        """Legacy build_messages should accept (posts, codex_entries)."""
-        from terrarium_annotator.context import AnnotationContext
-
-        ctx = AnnotationContext()
-        posts = [
-            StoryPost(
-                post_id=1,
-                thread_id=1,
-                body="Test post",
-                author="QM",
-                created_at=None,
-                tags=[],
-            )
-        ]
-
-        messages, payload = ctx.build_messages(posts, [])
-
-        assert isinstance(messages, list)
-        assert isinstance(payload, str)
-        assert "<story_passages>" in payload
-
-    def test_legacy_record_methods(self):
-        """Legacy record_user_turn and record_assistant_turn should work."""
-        from terrarium_annotator.context import AnnotationContext
-
-        ctx = AnnotationContext()
-        ctx.record_user_turn("Hello")
-        ctx.record_assistant_turn("Hi there")
-
-        assert len(ctx.conversation_history) == 2
-        assert ctx.conversation_history[0]["role"] == "user"
-        assert ctx.conversation_history[1]["role"] == "assistant"
-
-    def test_legacy_summary_property(self):
-        """Legacy context should have summary property."""
-        from terrarium_annotator.context import AnnotationContext
-
-        ctx = AnnotationContext(summary="Previous context")
-
-        assert ctx.summary == "Previous context"
-        ctx.summary = "Updated summary"
-        assert ctx.summary == "Updated summary"
-
-    def test_new_annotation_context_requires_system_prompt(self):
-        """NewAnnotationContext should require system_prompt."""
-        from terrarium_annotator.context import NewAnnotationContext
 
         # Should work with system_prompt
-        ctx = NewAnnotationContext(system_prompt="Test prompt")
+        ctx = AnnotationContext(system_prompt="Test prompt")
         assert ctx.system_prompt == "Test prompt"
 
         # Should fail without system_prompt
         import pytest
 
         with pytest.raises(TypeError):
-            NewAnnotationContext()  # type: ignore
+            AnnotationContext()  # type: ignore
