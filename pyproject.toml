@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "terrarium-annotator"
+version = "0.1.0"
+description = "Glossary annotation harness for terrarium quest fiction"
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.32.0",
+    "PyYAML>=6.0.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.4.0",
+]
+
+[project.scripts]
+terrarium-annotator = "terrarium_annotator.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
