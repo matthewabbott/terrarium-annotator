@@ -47,7 +47,7 @@ class RunnerConfig:
     resume: bool = True
     max_tool_rounds: int = 10
     # Compaction settings (F5)
-    context_budget: int = 16000
+    context_budget: int = 48000
     trigger_ratio: float = 0.80
     target_ratio: float = 0.70
     # Curator settings (F6)

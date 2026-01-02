@@ -76,6 +76,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=10,
         help="Max tool call rounds per scene (default: 10)",
     )
+    run_parser.add_argument(
+        "--context-budget",
+        type=int,
+        default=48000,
+        help="Context budget in tokens (default: 48000)",
+    )
 
     # Export command
     export_parser = subparsers.add_parser("export", help="Export glossary to JSON/YAML")
@@ -615,6 +621,7 @@ def run(args: argparse.Namespace) -> None:
         timeout=args.timeout,
         resume=not args.no_resume,
         max_tool_rounds=args.max_tool_rounds,
+        context_budget=args.context_budget,
     )
     runner = AnnotationRunner(config)
     try:
