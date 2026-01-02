@@ -86,6 +86,10 @@ The agent can call these tools via OpenAI function calling:
 | `glossary_delete` | Delete entry with reason |
 | `read_post` | Read a single post by ID |
 | `read_thread_range` | Read posts in a thread range |
+| `list_snapshots` | List available snapshots |
+| `summon_snapshot` | Load read-only historical view |
+| `summon_continue` | Continue summon conversation |
+| `summon_dismiss` | End summon session |
 
 ## Current Status
 
@@ -93,13 +97,14 @@ See `docs/ROADMAP.md` for feature status.
 
 - [x] F0: SQLite storage layer with FTS5
 - [x] F1: Scene-aware corpus batching
-- [x] F2: Token counting and context building (partial)
+- [x] F2: Token counting and context management
 - [x] F3: Tool dispatcher and implementations
 - [x] F3.5: Documentation and basic logging
-- [ ] F4: Runner MVP with new storage integration
-- [ ] F5: Context compaction and summarization
-- [ ] F6: Curator workflow
-- [ ] F7: Snapshots
+- [x] F4: Runner MVP with scene-based iteration
+- [x] F5: Context compaction and summarization
+- [x] F6: Curator workflow (end-of-thread evaluation)
+- [x] F7: Snapshots (checkpoint + summon)
+- [x] F7.5: Integration tests (agent auto-detection)
 - [ ] F8: Exporters
 
 ## Documentation
