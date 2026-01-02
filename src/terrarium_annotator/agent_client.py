@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import requests
 from requests import Response
@@ -76,6 +76,18 @@ class AgentClient:
         except RequestException:
             return False
 
+    def tokenize(self, text: str) -> List[int]:
+        """
+        Get token IDs for text.
+
+        Raises: AgentClientError if endpoint unavailable.
+        """
+        data = self._request_with_retry("POST", "/tokenize", json={"prompt": text})
+        try:
+            return data["tokens"]
+        except KeyError as exc:
+            raise AgentClientError(f"Malformed tokenize response: {exc}")
+
     def _request_with_retry(self, method: str, endpoint: str, **kwargs) -> Dict:
         url = f"{self.base_url}{endpoint}"
 
@@ -89,24 +101,26 @@ class AgentClient:
                 )
                 if response.status_code >= 500:
                     if attempt < self.max_retries - 1:
-                        time.sleep(2 ** attempt)
+                        time.sleep(2**attempt)
                         continue
                     raise AgentClientError(f"Server error: {response.text}")
                 if response.status_code >= 400:
-                    raise AgentClientError(f"Request error ({response.status_code}): {response.text}")
+                    raise AgentClientError(
+                        f"Request error ({response.status_code}): {response.text}"
+                    )
 
                 response.raise_for_status()
                 return response.json()
             except Timeout:
                 if attempt < self.max_retries - 1:
-                    time.sleep(2 ** attempt)
+                    time.sleep(2**attempt)
                     continue
                 raise AgentClientError("Request timed out")
             except ConnectionError:
                 raise AgentClientError(f"Cannot connect to {self.base_url}")
             except RequestException as exc:
                 if attempt < self.max_retries - 1:
-                    time.sleep(2 ** attempt)
+                    time.sleep(2**attempt)
                     continue
                 raise AgentClientError(f"Request failed: {exc}")
 

@@ -1,0 +1,136 @@
+"""Conversation state and message building."""
+
+from __future__ import annotations
+
+import copy
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from terrarium_annotator.context.models import ThreadSummary
+    from terrarium_annotator.corpus import Scene
+    from terrarium_annotator.storage import GlossaryEntry
+
+
+@dataclass
+class AnnotationContext:
+    """Conversation state and message building."""
+
+    system_prompt: str
+    max_turns: int = 12
+    conversation_history: list[dict] = field(default_factory=list)
+
+    def build_messages(
+        self,
+        *,
+        cumulative_summary: str | None = None,
+        thread_summaries: list[ThreadSummary] | None = None,
+        current_scene: Scene | None = None,
+        relevant_entries: list[GlossaryEntry] | None = None,
+        tools: list[dict] | None = None,
+    ) -> list[dict]:
+        """Build full message list for agent call."""
+        messages: list[dict] = [{"role": "system", "content": self.system_prompt}]
+
+        # Add cumulative summary if present
+        if cumulative_summary:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": f"<cumulative_summary>{cumulative_summary}</cumulative_summary>",
+                }
+            )
+
+        # Add thread summaries
+        if thread_summaries:
+            summaries_xml = self._format_thread_summaries(thread_summaries)
+            messages.append(
+                {
+                    "role": "system",
+                    "content": summaries_xml,
+                }
+            )
+
+        # Add conversation history (limited to max_turns)
+        recent_turns = self.conversation_history[-self.max_turns :]
+        messages.extend(recent_turns)
+
+        # Build and add user payload with scene + entries
+        if current_scene is not None:
+            user_content = self._format_user_payload(
+                current_scene,
+                relevant_entries or [],
+            )
+            messages.append({"role": "user", "content": user_content})
+
+        return messages
+
+    def record_turn(
+        self,
+        role: Literal["user", "assistant", "tool"],
+        content: str,
+        *,
+        tool_call_id: str | None = None,
+    ) -> None:
+        """Add turn to conversation history."""
+        turn: dict = {"role": role, "content": content}
+        if tool_call_id is not None:
+            turn["tool_call_id"] = tool_call_id
+        self.conversation_history.append(turn)
+
+    def get_history(self) -> list[dict]:
+        """Get conversation history (for serialization)."""
+        return list(self.conversation_history)
+
+    def clone(self) -> AnnotationContext:
+        """Deep copy for forking (curator, summon)."""
+        return AnnotationContext(
+            system_prompt=self.system_prompt,
+            max_turns=self.max_turns,
+            conversation_history=copy.deepcopy(self.conversation_history),
+        )
+
+    def _format_user_payload(
+        self,
+        scene: Scene,
+        entries: list[GlossaryEntry],
+    ) -> str:
+        """Format scene posts and glossary entries for user message."""
+        lines: list[str] = ["<story_passages>"]
+
+        for post in scene.posts:
+            meta = [f'id="{post.post_id}"']
+            if post.created_at:
+                meta.append(f'ts="{post.created_at.isoformat()}"')
+            if post.author:
+                meta.append(f'author="{post.author}"')
+            attr = " ".join(meta)
+            body = (post.body or "").strip()
+            lines.append(f"<post {attr}>{body}</post>")
+
+        lines.append("</story_passages>")
+
+        if entries:
+            lines.append("<known_glossary>")
+            for entry in entries:
+                tags_attr = f' tags="{",".join(entry.tags)}"' if entry.tags else ""
+                lines.append(
+                    f'<term name="{entry.term}"{tags_attr}>{entry.definition}</term>'
+                )
+            lines.append("</known_glossary>")
+
+        lines.append(
+            "<instructions>Emit glossary updates using tools as specified.</instructions>"
+        )
+        return "\n".join(lines)
+
+    def _format_thread_summaries(self, summaries: list[ThreadSummary]) -> str:
+        """Format thread summaries as XML block."""
+        lines = ["<thread_summaries>"]
+        for ts in summaries:
+            lines.append(
+                f'<thread id="{ts.thread_id}" position="{ts.position}">'
+                f"{ts.summary_text}</thread>"
+            )
+        lines.append("</thread_summaries>")
+        return "\n".join(lines)
