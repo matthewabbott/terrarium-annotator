@@ -13,6 +13,7 @@
 | **F5: Compaction** | :white_check_mark: Complete | ThreadSummarizer + ContextCompactor + 29 tests |
 | **F6: Curator** | :white_check_mark: Complete | CuratorFork + decision parsing + 19 tests |
 | **F7: Snapshots** | :white_check_mark: Complete | SnapshotStore + summon workflow + CASCADE fix + 34 tests |
+| **F7.5: Integration Tests** | :white_check_mark: Complete | Agent detection + e2e tests + 10 tests |
 | F8: Exporters | 🔴 Not Started | JSON/YAML export |
 
 ---
@@ -212,6 +213,46 @@ The existing `codex.py` uses JSON. We will:
 
 ---
 
+## Feature 7.5: Integration Tests
+
+**Objective**: End-to-end integration tests with live terrarium-agent server.
+
+### Scope
+
+1. Agent detection fixtures (auto-skip when unavailable)
+2. Tier 1: Agent connection tests (health, chat, tokenize)
+3. Tier 2: Tool calling tests (dispatch, create, search)
+4. Tier 3: Full pipeline tests (context, multi-turn, annotation)
+
+### Dependencies
+
+- F0-F7 (all prior features)
+- terrarium-agent server on localhost:8080
+
+### Acceptance Criteria
+
+- [x] `tests/conftest.py` with `agent_available` and `real_agent` fixtures
+- [x] `pytest.ini` updated with `integration` marker
+- [x] Tests skip gracefully when agent unavailable
+- [x] Tests pass when agent is running (10 pass)
+- [x] Unit tests still run without agent (`pytest -m "not integration"`)
+- [x] All 217 tests pass (207 unit + 10 integration)
+
+### Running Tests
+
+```bash
+# Run all tests (integration skipped if no agent)
+pytest
+
+# Run only unit tests
+pytest -m "not integration"
+
+# Run only integration tests (requires agent)
+pytest -m integration
+```
+
+---
+
 ## Feature 8: Exporters
 
 **Objective**: Human-readable glossary export.
@@ -242,6 +283,7 @@ Completed:
 - F5 (Compaction) - 2026-01-02
 - F6 (Curator) - 2026-01-02
 - F7 (Snapshots) - 2026-01-02
+- F7.5 (Integration Tests) - 2026-01-02
 
 See `docs/worklog/` for session notes.
 
@@ -262,6 +304,6 @@ The following items from the original roadmap are covered by the new feature bre
 | Cross-linked terms (related_terms) | `[[markup]]` syntax in definitions |
 | Bundled updates | F3: glossary_search tool |
 | Unknown term tracking | F6: Curator (tentative entries) |
-| End-to-end smoke test | Per-feature tests |
+| End-to-end smoke test | F7.5: Integration Tests |
 | Codex schema validation | F0: Storage migrations |
 | Benchmark harness | Future work |
