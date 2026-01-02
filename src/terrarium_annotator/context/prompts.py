@@ -38,3 +38,39 @@ Guidelines:
 
 You may include brief reasoning in your text response, but all glossary changes MUST be made via tool calls.
 """
+
+# Thread summarization prompt (F5)
+THREAD_SUMMARY_PROMPT = """Summarize the completed thread for context preservation.
+
+Include in your summary:
+1. Key plot events and narrative developments
+2. Important character actions, revelations, or decisions
+3. Glossary entries created or updated (listed below)
+
+<thread_id>{thread_id}</thread_id>
+
+<glossary_changes>
+Entries created: {entries_created}
+Entries updated: {entries_updated}
+</glossary_changes>
+
+Keep the summary concise (2-4 sentences) while preserving essential context for future annotation work. Focus on information that will help understand future story references."""
+
+# Cumulative summary merging prompt (F5)
+CUMULATIVE_SUMMARY_PROMPT = """Merge the following summaries into a single cumulative summary.
+
+<existing_summary>
+{cumulative}
+</existing_summary>
+
+<new_summaries>
+{summaries}
+</new_summaries>
+
+Create a cohesive summary that:
+1. Preserves essential plot and character information
+2. Removes redundancy between summaries
+3. Maintains chronological flow
+4. Keeps glossary progress tracking
+
+Keep under 500 words while preserving key context."""

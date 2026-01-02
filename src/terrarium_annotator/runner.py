@@ -9,7 +9,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from terrarium_annotator.agent_client import AgentClient, AgentClientError
-from terrarium_annotator.context import AnnotationContext, TOOL_SYSTEM_PROMPT
+from terrarium_annotator.context import (
+    AnnotationContext,
+    CompactionState,
+    ContextCompactor,
+    ThreadSummarizer,
+    TokenCounter,
+    TOOL_SYSTEM_PROMPT,
+)
 from terrarium_annotator.corpus import CorpusReader, SceneBatcher
 from terrarium_annotator.storage import GlossaryStore, ProgressTracker, RevisionHistory
 from terrarium_annotator.tools import ToolDispatcher
@@ -33,6 +40,10 @@ class RunnerConfig:
     timeout: int = 120
     resume: bool = True
     max_tool_rounds: int = 10
+    # Compaction settings (F5)
+    context_budget: int = 16000
+    trigger_ratio: float = 0.80
+    target_ratio: float = 0.70
 
 
 @dataclass
@@ -94,6 +105,22 @@ class AnnotationRunner:
             timeout=config.timeout,
         )
 
+        # Compaction (F5)
+        self.token_counter = TokenCounter(agent_client=self.agent)
+        self.summarizer = ThreadSummarizer(
+            agent_client=self.agent,
+            glossary=self.glossary,
+        )
+        self.compactor = ContextCompactor(
+            token_counter=self.token_counter,
+            summarizer=self.summarizer,
+            agent_client=self.agent,
+            context_budget=config.context_budget,
+            trigger_ratio=config.trigger_ratio,
+            target_ratio=config.target_ratio,
+        )
+        self.compaction_state = CompactionState()
+
     def close(self) -> None:
         """Close all database connections."""
         self.glossary.close()
@@ -143,6 +170,8 @@ class AnnotationRunner:
                     self.progress.update_thread_state(
                         current_thread_id, status="completed"
                     )
+                    # Track for compaction (F5)
+                    self.compaction_state.completed_thread_ids.append(current_thread_id)
                     LOGGER.info("Thread %d completed", current_thread_id)
 
                 current_thread_id = scene.thread_id
@@ -162,10 +191,12 @@ class AnnotationRunner:
             # Search for relevant glossary entries
             relevant_entries = self._search_relevant_entries(scene)
 
-            # Build messages
+            # Build messages with compaction state (F5)
             messages = self.context.build_messages(
                 current_scene=scene,
                 relevant_entries=relevant_entries,
+                cumulative_summary=self.compaction_state.cumulative_summary or None,
+                thread_summaries=self.compaction_state.thread_summaries or None,
             )
 
             # Execute tool loop
@@ -272,6 +303,18 @@ class AnnotationRunner:
 
         for round_num in range(self.config.max_tool_rounds):
             stats.rounds = round_num + 1
+
+            # Check compaction before agent call (F5)
+            if self.compactor.should_compact(current_messages):
+                current_messages, compact_result = self.compactor.compact(
+                    current_messages, self.compaction_state
+                )
+                LOGGER.info(
+                    "Compacted: %d -> %d tokens (target reached: %s)",
+                    compact_result.initial_tokens,
+                    compact_result.final_tokens,
+                    compact_result.target_reached,
+                )
 
             # Call agent
             response = self.agent.chat(
