@@ -6,7 +6,7 @@
 |---------|--------|-------|
 | **F0: Storage Layer** | :white_check_mark: Complete | SQLite + migrations + FTS5 |
 | **F1: Corpus Layer** | :white_check_mark: Complete | CorpusReader + SceneBatcher |
-| F2: Context Layer | 🔴 Not Started | TokenCounter + AnnotationContext |
+| **F2: Context Layer** | :white_check_mark: Complete | TokenCounter + AnnotationContext |
 | F3: Tool Layer | 🔴 Not Started | Dispatcher + Glossary/Corpus tools |
 | F4: Runner MVP | 🔴 Not Started | Basic loop without curator |
 | F5: Compaction | 🔴 Not Started | Summarizer + Compactor |
@@ -203,10 +203,11 @@ The existing `codex.py` uses JSON. We will:
 
 ## Current Focus
 
-**Feature 2: Context Layer** is the next priority.
+**Feature 3: Tool Layer** is the next priority.
 
 F0 (Storage Layer) completed 2026-01-02.
 F1 (Corpus Layer) completed 2026-01-02.
+F2 (Context Layer) completed 2026-01-02.
 
 See `docs/worklog/` for session notes.
 
