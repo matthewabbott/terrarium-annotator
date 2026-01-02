@@ -253,10 +253,15 @@ class TestToolSchemas:
         schemas = get_all_tool_schemas(include_snapshot_tools=False)
         assert len(schemas) == 6
 
-    def test_include_snapshot_tools_true_currently_same(self):
-        # Until F7, this should return same result
+    def test_include_snapshot_tools_true_adds_four_tools(self):
+        # F7 adds 4 snapshot tools: list_snapshots, summon_snapshot, summon_continue, summon_dismiss
         schemas = get_all_tool_schemas(include_snapshot_tools=True)
-        assert len(schemas) == 6
+        assert len(schemas) == 10  # 6 base + 4 snapshot tools
+        tool_names = {s["function"]["name"] for s in schemas}
+        assert "list_snapshots" in tool_names
+        assert "summon_snapshot" in tool_names
+        assert "summon_continue" in tool_names
+        assert "summon_dismiss" in tool_names
 
 
 class TestToolDispatcher:

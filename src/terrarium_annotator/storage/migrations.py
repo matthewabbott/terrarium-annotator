@@ -193,11 +193,42 @@ MIGRATION_003_SNAPSHOT_FK = Migration(
     ],
 )
 
+# Migration 004: Fix CASCADE on revision.entry_id to preserve audit trail
+# When glossary entries are deleted, we want to keep the revision history
+# with entry_id set to NULL rather than deleting the revision records.
+MIGRATION_004_REVISION_CASCADE_FIX = Migration(
+    version=4,
+    name="revision_entry_set_null",
+    statements=[
+        # SQLite doesn't support ALTER CONSTRAINT, so recreate the table
+        """
+        CREATE TABLE revision_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entry_id INTEGER,
+            snapshot_id INTEGER,
+            field_name TEXT NOT NULL,
+            old_value TEXT,
+            new_value TEXT NOT NULL,
+            changed_at TEXT NOT NULL,
+            source_post_id INTEGER,
+            FOREIGN KEY (entry_id) REFERENCES glossary_entry(id) ON DELETE SET NULL,
+            FOREIGN KEY (snapshot_id) REFERENCES snapshot(id) ON DELETE SET NULL
+        )
+        """,
+        "INSERT INTO revision_new SELECT * FROM revision",
+        "DROP TABLE revision",
+        "ALTER TABLE revision_new RENAME TO revision",
+        "CREATE INDEX idx_revision_entry ON revision(entry_id, changed_at)",
+        "CREATE INDEX idx_revision_snapshot ON revision(snapshot_id)",
+    ],
+)
+
 # All migrations in order
 ALL_MIGRATIONS: list[Migration] = [
     MIGRATION_001_INITIAL,
     MIGRATION_002_FTS,
     MIGRATION_003_SNAPSHOT_FK,
+    MIGRATION_004_REVISION_CASCADE_FIX,
 ]
 
 

@@ -182,12 +182,98 @@ ALL_TOOL_SCHEMAS: list[dict] = [
     CORPUS_READ_THREAD_RANGE_SCHEMA,
 ]
 
+# Snapshot tool schemas (F7)
+LIST_SNAPSHOTS_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "list_snapshots",
+        "description": "List recent snapshots for checkpoint/restore.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum snapshots to return (default: 20)",
+                },
+                "snapshot_type": {
+                    "type": "string",
+                    "enum": ["checkpoint", "curator_fork", "manual"],
+                    "description": "Filter by snapshot type (optional)",
+                },
+            },
+            "required": [],
+        },
+    },
+}
+
+SUMMON_SNAPSHOT_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "summon_snapshot",
+        "description": (
+            "Summon a historical snapshot for read-only exploration. "
+            "Allows examining glossary state at a point in time."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "snapshot_id": {
+                    "type": "integer",
+                    "description": "ID of snapshot to summon",
+                },
+            },
+            "required": ["snapshot_id"],
+        },
+    },
+}
+
+SUMMON_CONTINUE_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "summon_continue",
+        "description": (
+            "Continue conversation in summoned context. "
+            "Ask questions about the historical state."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "description": "Question or message about the summoned state",
+                },
+            },
+            "required": ["message"],
+        },
+    },
+}
+
+SUMMON_DISMISS_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "summon_dismiss",
+        "description": "Dismiss the active summon and return to normal operation.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+}
+
+SNAPSHOT_TOOL_SCHEMAS: list[dict] = [
+    LIST_SNAPSHOTS_SCHEMA,
+    SUMMON_SNAPSHOT_SCHEMA,
+    SUMMON_CONTINUE_SCHEMA,
+    SUMMON_DISMISS_SCHEMA,
+]
+
 
 def get_all_tool_schemas(include_snapshot_tools: bool = False) -> list[dict]:
     """Return all tool schemas in OpenAI function calling format.
 
     Args:
-        include_snapshot_tools: Include snapshot tools (F7). Currently no-op.
+        include_snapshot_tools: Include snapshot tools (F7).
 
     Returns:
         List of tool definitions, each with 'type': 'function' and 'function'
@@ -200,6 +286,12 @@ def get_all_tool_schemas(include_snapshot_tools: bool = False) -> list[dict]:
         - glossary_delete: Delete entry with reason
         - read_post: Read single post by ID
         - read_thread_range: Read posts in thread range
+        - list_snapshots: List recent snapshots (F7)
+        - summon_snapshot: Summon historical snapshot (F7)
+        - summon_continue: Continue summon conversation (F7)
+        - summon_dismiss: Dismiss active summon (F7)
     """
-    # Snapshot tools will be added in F7
-    return list(ALL_TOOL_SCHEMAS)
+    schemas = list(ALL_TOOL_SCHEMAS)
+    if include_snapshot_tools:
+        schemas.extend(SNAPSHOT_TOOL_SCHEMAS)
+    return schemas

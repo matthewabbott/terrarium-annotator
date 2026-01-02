@@ -39,6 +39,26 @@ class CompactionState:
     thread_summaries: list[ThreadSummary] = field(default_factory=list)
     completed_thread_ids: list[int] = field(default_factory=list)
 
+    def to_dict(self) -> dict:
+        """Serialize to dict for snapshot storage."""
+        return {
+            "cumulative_summary": self.cumulative_summary,
+            "thread_summaries": [ts.to_dict() for ts in self.thread_summaries],
+            "completed_thread_ids": self.completed_thread_ids,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> CompactionState:
+        """Reconstruct from snapshot data."""
+        state = cls()
+        state.cumulative_summary = data.get("cumulative_summary", "")
+        state.thread_summaries = [
+            ThreadSummary.from_dict(ts)
+            for ts in data.get("thread_summaries", [])
+        ]
+        state.completed_thread_ids = data.get("completed_thread_ids", [])
+        return state
+
 
 class ContextCompactor:
     """
