@@ -14,7 +14,7 @@
 | **F6: Curator** | :white_check_mark: Complete | CuratorFork + decision parsing + 19 tests |
 | **F7: Snapshots** | :white_check_mark: Complete | SnapshotStore + summon workflow + CASCADE fix + 34 tests |
 | **F7.5: Integration Tests** | :white_check_mark: Complete | Agent detection + e2e tests + 10 tests |
-| F8: Exporters | 🔴 Not Started | JSON/YAML export |
+| **F8: Exporters** | :white_check_mark: Complete | JSON/YAML export + CLI + filtering + 14 tests |
 
 ---
 
@@ -255,23 +255,48 @@ pytest -m integration
 
 ## Feature 8: Exporters
 
-**Objective**: Human-readable glossary export.
+**Objective**: Human-readable glossary export with filtering.
 
 ### Scope
 
 1. JSON exporter
 2. YAML exporter
-3. CLI export command
+3. CLI export command with filtering
 
 ### Dependencies
 
 - F0 (GlossaryStore.all_entries)
 
+### Acceptance Criteria
+
+- [x] `exporters/` module with base, json, yaml exporters
+- [x] CLI `export` command with --format, --output, --status, --tags
+- [x] Default filename generation (glossary_YYYY-MM-DD.{format})
+- [x] Filtering by status and tags works correctly
+- [x] PyYAML added to requirements.txt
+- [x] All tests pass (14 exporter tests)
+
+### CLI Usage
+
+```bash
+# Export all entries to JSON (default filename)
+python -m terrarium_annotator.cli export
+
+# Export to YAML
+python -m terrarium_annotator.cli export --format yaml -o glossary.yaml
+
+# Export only confirmed entries
+python -m terrarium_annotator.cli export --status confirmed
+
+# Export character entries only
+python -m terrarium_annotator.cli export --tags character
+```
+
 ---
 
 ## Current Focus
 
-**Feature 8: Exporters** is the next priority.
+**All planned features complete!**
 
 Completed:
 - F0 (Storage Layer) - 2026-01-02
@@ -284,6 +309,7 @@ Completed:
 - F6 (Curator) - 2026-01-02
 - F7 (Snapshots) - 2026-01-02
 - F7.5 (Integration Tests) - 2026-01-02
+- F8 (Exporters) - 2026-01-02
 
 See `docs/worklog/` for session notes.
 
