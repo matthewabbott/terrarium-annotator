@@ -184,14 +184,22 @@ ALL_TOOL_SCHEMAS: list[dict] = [
 
 
 def get_all_tool_schemas(include_snapshot_tools: bool = False) -> list[dict]:
-    """
-    Return all tool schemas for OpenAI function calling.
+    """Return all tool schemas in OpenAI function calling format.
 
     Args:
-        include_snapshot_tools: Include snapshot tools (F7). Currently ignored.
+        include_snapshot_tools: Include snapshot tools (F7). Currently no-op.
 
     Returns:
-        List of tool schemas in OpenAI function calling format.
+        List of tool definitions, each with 'type': 'function' and 'function'
+        containing 'name', 'description', and 'parameters'.
+
+    Available tools:
+        - glossary_search: Search glossary by query, tags, status
+        - glossary_create: Create new glossary entry
+        - glossary_update: Update existing entry
+        - glossary_delete: Delete entry with reason
+        - read_post: Read single post by ID
+        - read_thread_range: Read posts in thread range
     """
     # Snapshot tools will be added in F7
     return list(ALL_TOOL_SCHEMAS)

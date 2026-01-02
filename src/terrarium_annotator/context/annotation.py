@@ -29,7 +29,26 @@ class AnnotationContext:
         relevant_entries: list[GlossaryEntry] | None = None,
         tools: list[dict] | None = None,
     ) -> list[dict]:
-        """Build full message list for agent call."""
+        """Build OpenAI-compatible message list for annotation request.
+
+        Constructs messages in order:
+        1. System prompt
+        2. Cumulative summary (if provided)
+        3. Thread summaries (if provided)
+        4. Recent conversation history (limited to max_turns)
+        5. User message with current scene and relevant glossary entries
+
+        Args:
+            cumulative_summary: Running summary of all completed threads.
+            thread_summaries: Summaries of recently completed threads.
+            current_scene: Scene being annotated.
+            relevant_entries: Glossary entries to include for context.
+            tools: Tool definitions (currently unused, for future tool_choice).
+
+        Returns:
+            List of message dicts with 'role' and 'content' keys,
+            ready for OpenAI chat completion API.
+        """
         messages: list[dict] = [{"role": "system", "content": self.system_prompt}]
 
         # Add cumulative summary if present
@@ -72,7 +91,14 @@ class AnnotationContext:
         *,
         tool_call_id: str | None = None,
     ) -> None:
-        """Add turn to conversation history."""
+        """Record a conversation turn in history.
+
+        Args:
+            role: Message role - 'user', 'assistant', or 'tool'.
+            content: Message content.
+            tool_call_id: Required when role='tool', the ID of the tool call
+                being responded to.
+        """
         turn: dict = {"role": role, "content": content}
         if tool_call_id is not None:
             turn["tool_call_id"] = tool_call_id

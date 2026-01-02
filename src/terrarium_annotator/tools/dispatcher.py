@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import re
 from typing import TYPE_CHECKING, Any, Callable
 
 from terrarium_annotator.tools.corpus_tools import CorpusTools
@@ -10,6 +12,8 @@ from terrarium_annotator.tools.glossary_tools import GlossaryTools
 from terrarium_annotator.tools.result import ToolResult
 from terrarium_annotator.tools.schemas import get_all_tool_schemas
 from terrarium_annotator.tools.xml_formatter import format_error
+
+LOGGER = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from terrarium_annotator.corpus import CorpusReader
@@ -74,10 +78,13 @@ class ToolDispatcher:
         tool_name = func.get("name", "")
         args_json = func.get("arguments", "{}")
 
+        LOGGER.info("Tool call: %s (id=%s)", tool_name, call_id)
+
         # Parse JSON arguments
         try:
             args = json.loads(args_json)
         except json.JSONDecodeError as e:
+            LOGGER.warning("Tool error: %s code=INVALID_JSON: %s", tool_name, e)
             return ToolResult(
                 tool_name=tool_name,
                 call_id=call_id,
@@ -89,6 +96,7 @@ class ToolDispatcher:
         # Find handler
         handler_entry = self._handlers.get(tool_name)
         if handler_entry is None:
+            LOGGER.warning("Tool error: %s code=UNKNOWN_TOOL", tool_name)
             return ToolResult(
                 tool_name=tool_name,
                 call_id=call_id,
@@ -109,6 +117,14 @@ class ToolDispatcher:
             # Detect success/failure from error tag presence
             success = "<error" not in result
 
+            if success:
+                LOGGER.debug("Tool success: %s", tool_name)
+            else:
+                # Extract error code from result
+                code_match = re.search(r'code="([^"]+)"', result)
+                code = code_match.group(1) if code_match else "UNKNOWN"
+                LOGGER.warning("Tool error: %s code=%s", tool_name, code)
+
             return ToolResult(
                 tool_name=tool_name,
                 call_id=call_id,
@@ -118,6 +134,7 @@ class ToolDispatcher:
             )
 
         except Exception as e:
+            LOGGER.error("Tool exception: %s: %s", tool_name, e)
             return ToolResult(
                 tool_name=tool_name,
                 call_id=call_id,

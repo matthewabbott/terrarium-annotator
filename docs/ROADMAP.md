@@ -6,12 +6,13 @@
 |---------|--------|-------|
 | **F0: Storage Layer** | :white_check_mark: Complete | SQLite + migrations + FTS5 |
 | **F1: Corpus Layer** | :white_check_mark: Complete | CorpusReader + SceneBatcher |
-| **F2: Context Layer** | :white_check_mark: Complete | TokenCounter + AnnotationContext |
-| F3: Tool Layer | 🔴 Not Started | Dispatcher + Glossary/Corpus tools |
-| F4: Runner MVP | 🔴 Not Started | Basic loop without curator |
-| F5: Compaction | 🔴 Not Started | Summarizer + Compactor |
+| **F2: Context Layer** | :warning: Partial | TokenCounter + AnnotationContext complete; ContextCompactor + ThreadSummarizer deferred to F5 |
+| **F3: Tool Layer** | :white_check_mark: Complete | ToolDispatcher + all 6 tools + 36 tests |
+| **F3.5: Documentation & Logging** | :white_check_mark: Complete | Docstrings + basic logging |
+| F4: Runner MVP | 🔴 Not Started | Integrate new storage, tools, scene batching |
+| F5: Compaction | 🔴 Not Started | Summarizer + Compactor (+ deferred F2 items) |
 | F6: Curator | 🔴 Not Started | End-of-thread fork workflow |
-| F7: Snapshots | 🔴 Not Started | Save/load/summon |
+| F7: Snapshots | 🔴 Not Started | Save/load/summon + CASCADE fix |
 | F8: Exporters | 🔴 Not Started | JSON/YAML export |
 
 ---
@@ -203,11 +204,14 @@ The existing `codex.py` uses JSON. We will:
 
 ## Current Focus
 
-**Feature 3: Tool Layer** is the next priority.
+**Feature 4: Runner MVP** is the next priority.
 
-F0 (Storage Layer) completed 2026-01-02.
-F1 (Corpus Layer) completed 2026-01-02.
-F2 (Context Layer) completed 2026-01-02.
+Completed:
+- F0 (Storage Layer) - 2026-01-02
+- F1 (Corpus Layer) - 2026-01-02
+- F2 (Context Layer) - 2026-01-02 (partial: TokenCounter + AnnotationContext)
+- F3 (Tool Layer) - 2026-01-02
+- F3.5 (Documentation & Logging) - 2026-01-02
 
 See `docs/worklog/` for session notes.
 

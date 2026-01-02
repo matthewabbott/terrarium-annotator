@@ -557,3 +557,21 @@ class CuratorDecision:
     revised_definition: str | None  # For REVISE
     reasoning: str
 ```
+
+## Known Issues
+
+### Revision CASCADE Deletion (Defer to F7)
+
+**Issue:** The `revision` table has `ON DELETE CASCADE` on the `entry_id` foreign key
+(see `storage/migrations.py`). When a glossary entry is deleted, all its revision
+history is also deleted.
+
+**Impact:** Deletion audit trail is lost. The deletion IS logged by `GlossaryTools.delete()`
+but immediately cascade-deleted when `GlossaryStore.delete()` removes the entry.
+
+**Workaround:** None currently. Deletion events cannot be audited after the fact.
+
+**Resolution:** Planned for F7 (Snapshot System). Options under consideration:
+- Change to `ON DELETE SET NULL` (preserves revisions with null entry_id)
+- Remove FK constraint entirely (revisions become independent audit log)
+- Add separate `deletion_log` table

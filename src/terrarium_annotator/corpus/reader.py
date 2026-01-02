@@ -127,7 +127,19 @@ class CorpusReader:
         before: int = 2,
         after: int = 2,
     ) -> list[StoryPost]:
-        """Fetch posts surrounding a given post for context."""
+        """Get posts adjacent to a given post within the same thread.
+
+        Useful for providing context around a specific post.
+
+        Args:
+            post_id: Reference post ID.
+            before: Number of posts before to retrieve (default 2).
+            after: Number of posts after to retrieve (default 2).
+
+        Returns:
+            List of adjacent posts in chronological order, including the
+            reference post itself. Empty list if reference post not found.
+        """
         # Get the target post to find its thread and time
         target = self.get_post(post_id)
         if target is None:

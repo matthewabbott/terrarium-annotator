@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -9,6 +10,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
 
 from terrarium_annotator.storage.exceptions import DatabaseError, MigrationError
+
+LOGGER = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from terrarium_annotator.storage.migrations import Migration
@@ -87,6 +90,11 @@ class Database:
 
         for migration in migrations:
             if migration.version <= current_version:
+                LOGGER.debug(
+                    "Skipping migration %d (%s): already applied",
+                    migration.version,
+                    migration.name,
+                )
                 continue
 
             try:
@@ -98,7 +106,16 @@ class Database:
                         (migration.version, utcnow()),
                     )
                 applied += 1
+                LOGGER.info(
+                    "Applied migration %d: %s", migration.version, migration.name
+                )
             except sqlite3.Error as e:
+                LOGGER.error(
+                    "Migration %d (%s) failed: %s",
+                    migration.version,
+                    migration.name,
+                    e,
+                )
                 raise MigrationError(
                     f"Migration {migration.version} ({migration.name}) failed: {e}"
                 ) from e

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional
@@ -9,6 +10,8 @@ from typing import Dict, List, Optional
 import requests
 from requests import Response
 from requests.exceptions import ConnectionError, RequestException, Timeout
+
+LOGGER = logging.getLogger(__name__)
 
 
 class AgentClientError(Exception):
@@ -90,6 +93,10 @@ class AgentClient:
 
     def _request_with_retry(self, method: str, endpoint: str, **kwargs) -> Dict:
         url = f"{self.base_url}{endpoint}"
+        start_time = time.time()
+        last_error: str | None = None
+
+        LOGGER.debug("Agent request: %s %s", method, endpoint)
 
         for attempt in range(self.max_retries):
             try:
@@ -100,28 +107,79 @@ class AgentClient:
                     **kwargs,
                 )
                 if response.status_code >= 500:
+                    last_error = f"Server error {response.status_code}"
                     if attempt < self.max_retries - 1:
-                        time.sleep(2**attempt)
+                        wait = 2**attempt
+                        LOGGER.warning(
+                            "Agent retry %d/%d after %.1fs: %s",
+                            attempt + 1,
+                            self.max_retries,
+                            wait,
+                            last_error,
+                        )
+                        time.sleep(wait)
                         continue
+                    LOGGER.error(
+                        "Agent request failed after %d attempts: %s",
+                        self.max_retries,
+                        last_error,
+                    )
                     raise AgentClientError(f"Server error: {response.text}")
                 if response.status_code >= 400:
+                    LOGGER.warning(
+                        "Agent request error: %s %d", endpoint, response.status_code
+                    )
                     raise AgentClientError(
                         f"Request error ({response.status_code}): {response.text}"
                     )
 
                 response.raise_for_status()
+                elapsed = time.time() - start_time
+                LOGGER.debug(
+                    "Agent response: %d in %.2fs", response.status_code, elapsed
+                )
                 return response.json()
             except Timeout:
+                last_error = "Request timed out"
                 if attempt < self.max_retries - 1:
-                    time.sleep(2**attempt)
+                    wait = 2**attempt
+                    LOGGER.warning(
+                        "Agent retry %d/%d after %.1fs: %s",
+                        attempt + 1,
+                        self.max_retries,
+                        wait,
+                        last_error,
+                    )
+                    time.sleep(wait)
                     continue
+                LOGGER.error(
+                    "Agent request failed after %d attempts: %s",
+                    self.max_retries,
+                    last_error,
+                )
                 raise AgentClientError("Request timed out")
             except ConnectionError:
+                LOGGER.error("Agent connection failed: cannot connect to %s", self.base_url)
                 raise AgentClientError(f"Cannot connect to {self.base_url}")
             except RequestException as exc:
+                last_error = str(exc)
                 if attempt < self.max_retries - 1:
-                    time.sleep(2**attempt)
+                    wait = 2**attempt
+                    LOGGER.warning(
+                        "Agent retry %d/%d after %.1fs: %s",
+                        attempt + 1,
+                        self.max_retries,
+                        wait,
+                        last_error,
+                    )
+                    time.sleep(wait)
                     continue
+                LOGGER.error(
+                    "Agent request failed after %d attempts: %s",
+                    self.max_retries,
+                    last_error,
+                )
                 raise AgentClientError(f"Request failed: {exc}")
 
+        LOGGER.error("Agent request exceeded retry budget")
         raise AgentClientError("Exceeded retry budget")
