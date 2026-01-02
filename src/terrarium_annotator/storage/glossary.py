@@ -370,6 +370,13 @@ class GlossaryStore:
         cursor = self.conn.execute("SELECT COUNT(*) FROM glossary_entry")
         return cursor.fetchone()[0]
 
+    def count_by_status(self) -> dict[str, int]:
+        """Return counts grouped by status."""
+        cursor = self.conn.execute(
+            "SELECT status, COUNT(*) as cnt FROM glossary_entry GROUP BY status"
+        )
+        return {row["status"]: row["cnt"] for row in cursor}
+
     def get_by_thread(
         self,
         thread_id: int,

@@ -15,6 +15,7 @@
 | **F7: Snapshots** | :white_check_mark: Complete | SnapshotStore + summon workflow + CASCADE fix + 34 tests |
 | **F7.5: Integration Tests** | :white_check_mark: Complete | Agent detection + e2e tests + 10 tests |
 | **F8: Exporters** | :white_check_mark: Complete | JSON/YAML export + CLI + filtering + 14 tests |
+| **F8.5: Inspect Commands** | :white_check_mark: Complete | status + inspect CLI + JSON output + 17 tests |
 
 ---
 
@@ -294,6 +295,59 @@ python -m terrarium_annotator.cli export --tags character
 
 ---
 
+## Feature 8.5: Inspect Commands
+
+**Objective**: CLI commands for monitoring annotation run state and inspecting data.
+
+### Scope
+
+1. `status` command for quick overview
+2. `inspect` subcommands for detailed examination
+3. JSON output format option for machine-readable output
+
+### Dependencies
+
+- F0 (ProgressTracker, GlossaryStore, SnapshotStore)
+- F8 (CLI patterns)
+
+### Acceptance Criteria
+
+- [x] `status` command shows run state, stats, glossary summary, snapshot count
+- [x] `inspect snapshots` lists recent snapshots with metadata
+- [x] `inspect snapshot <id>` shows full snapshot details including context
+- [x] `inspect entries` lists recent entries with filters
+- [x] `inspect entry <id>` shows full entry details
+- [x] `inspect thread <id>` shows thread state and related data
+- [x] All commands support `--format json` for machine-readable output
+- [x] All 238 tests pass (221 existing + 17 new)
+
+### CLI Usage
+
+```bash
+# Quick status overview
+python -m terrarium_annotator.cli status
+python -m terrarium_annotator.cli status --format json
+
+# List recent snapshots
+python -m terrarium_annotator.cli inspect snapshots
+python -m terrarium_annotator.cli inspect snapshots --limit 5 --type checkpoint
+
+# View specific snapshot
+python -m terrarium_annotator.cli inspect snapshot 42
+
+# List recent entries
+python -m terrarium_annotator.cli inspect entries
+python -m terrarium_annotator.cli inspect entries --status tentative --limit 20
+
+# View specific entry
+python -m terrarium_annotator.cli inspect entry 15
+
+# View thread state
+python -m terrarium_annotator.cli inspect thread 8
+```
+
+---
+
 ## Current Focus
 
 **All planned features complete!**
@@ -310,6 +364,7 @@ Completed:
 - F7 (Snapshots) - 2026-01-02
 - F7.5 (Integration Tests) - 2026-01-02
 - F8 (Exporters) - 2026-01-02
+- F8.5 (Inspect Commands) - 2026-01-02
 
 See `docs/worklog/` for session notes.
 

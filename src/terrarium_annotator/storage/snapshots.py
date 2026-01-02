@@ -400,3 +400,10 @@ class SnapshotStore:
         """Return total number of snapshots."""
         cursor = self.conn.execute("SELECT COUNT(*) FROM snapshot")
         return cursor.fetchone()[0]
+
+    def count_by_type(self) -> dict[str, int]:
+        """Return counts grouped by snapshot type."""
+        cursor = self.conn.execute(
+            "SELECT snapshot_type, COUNT(*) as cnt FROM snapshot GROUP BY snapshot_type"
+        )
+        return {row["snapshot_type"]: row["cnt"] for row in cursor}
