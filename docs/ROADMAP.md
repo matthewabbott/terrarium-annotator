@@ -4,8 +4,8 @@
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| **F0: Storage Layer** | 🔴 Not Started | SQLite + migrations + FTS5 |
-| F1: Corpus Layer | 🔴 Not Started | CorpusReader + SceneBatcher |
+| **F0: Storage Layer** | :white_check_mark: Complete | SQLite + migrations + FTS5 |
+| **F1: Corpus Layer** | 🔴 Not Started | CorpusReader + SceneBatcher |
 | F2: Context Layer | 🔴 Not Started | TokenCounter + AnnotationContext |
 | F3: Tool Layer | 🔴 Not Started | Dispatcher + Glossary/Corpus tools |
 | F4: Runner MVP | 🔴 Not Started | Basic loop without curator |
@@ -49,12 +49,12 @@ src/terrarium_annotator/storage/
 
 ### Acceptance Criteria
 
-- [ ] `annotator.db` created with all tables from SCHEMA.md
-- [ ] FTS5 triggers working
-- [ ] GlossaryStore CRUD operations work
-- [ ] Revision history logged on updates/deletes
-- [ ] ProgressTracker saves/loads run state
-- [ ] All tests pass
+- [x] `annotator.db` created with all tables from SCHEMA.md
+- [x] FTS5 triggers working
+- [x] GlossaryStore CRUD operations work
+- [x] Revision history logged on updates/deletes
+- [x] ProgressTracker saves/loads run state
+- [x] All tests pass (27 tests)
 
 ### Migration from Existing Code
 
@@ -203,9 +203,9 @@ The existing `codex.py` uses JSON. We will:
 
 ## Current Focus
 
-**Feature 0: Storage Layer** is the current priority.
+**Feature 1: Corpus Layer** is the next priority.
 
-See `docs/worklog/` for latest session notes.
+F0 (Storage Layer) completed 2026-01-02. See `docs/worklog/` for session notes.
 
 ---
 
