@@ -1,4 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
 
+# Virtual environments
+.venv/
+venv/
+env/
 
 # Data
 *.db
+data/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
