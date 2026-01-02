@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 from .codex import CodexEntry
-from .corpus import StoryPost
+from .corpus import StoryPost  # Now from corpus/ submodule
 
 SYSTEM_PROMPT = """You are Terra-annotator, a focused LLM agent tasked with building and maintaining a codex for the Banished Quest corpus.
 
