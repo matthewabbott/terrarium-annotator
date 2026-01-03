@@ -206,11 +206,21 @@ class ContextCompactor:
         # Determine how aggressive to be
         is_emergency = current_tokens > self.emergency_threshold
         max_iterations = 20  # Safety limit
+        prev_tokens = current_tokens + 1  # Ensure first iteration runs
 
         for iteration in range(max_iterations):
             if current_tokens <= self.target:
                 result.target_reached = True
                 break
+
+            # Detect no-progress doom loop
+            if current_tokens >= prev_tokens:
+                LOGGER.warning(
+                    "Compaction stalled at %d tokens (no progress), breaking",
+                    current_tokens,
+                )
+                break
+            prev_tokens = current_tokens
 
             # Tier 1: Summarize oldest completed thread
             # Only if we have 2+ completed threads (preserve current thread's context)
@@ -431,6 +441,11 @@ class ContextCompactor:
 
             content = msg.get("content", "")
             if not content or msg.get("role") != "assistant":
+                result.append(msg)
+                continue
+
+            # Skip already-truncated messages
+            if content.endswith("... [truncated]"):
                 result.append(msg)
                 continue
 

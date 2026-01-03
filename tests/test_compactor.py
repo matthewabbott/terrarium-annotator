@@ -255,6 +255,35 @@ class TestContextCompactor:
         # Should not truncate since it's within max_age
         assert result_messages[0]["content"] == long_content
 
+    def test_tier4_skips_already_truncated(self, mock_counter, mock_summarizer):
+        """Tier 4: Should not re-truncate already-truncated messages."""
+        # This prevents the doom loop where truncated messages (515 chars)
+        # are still > max_len (500) and get re-counted each iteration
+        compactor = ContextCompactor(
+            mock_counter, mock_summarizer, context_budget=10000
+        )
+
+        # Message that's already been truncated
+        already_truncated = "A" * 500 + "... [truncated]"
+        messages = [
+            {"role": "assistant", "content": already_truncated},
+            {"role": "user", "content": "Q1"},
+            {"role": "assistant", "content": "Short"},
+            {"role": "user", "content": "Q2"},
+            {"role": "assistant", "content": "Short"},
+            {"role": "user", "content": "Q3"},
+            {"role": "assistant", "content": "Short"},
+            {"role": "user", "content": "Q4"},
+            {"role": "assistant", "content": "Recent"},
+        ]
+
+        result_messages, count = compactor._truncate_responses(messages, max_age=8, max_len=500)
+
+        # Should NOT count already-truncated message
+        assert count == 0
+        # Content should be unchanged
+        assert result_messages[0]["content"] == already_truncated
+
     def test_stops_when_target_reached(self, mock_counter, mock_summarizer):
         """Should stop compacting once target is reached."""
         # Returns above target, then below after first tier
