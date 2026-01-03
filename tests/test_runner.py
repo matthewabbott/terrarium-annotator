@@ -195,7 +195,8 @@ class TestAnnotationRunner:
 
         # Mock agent to return no tool calls
         mock_components["agent"].return_value.chat.return_value = Mock(
-            message={"content": "Done", "tool_calls": []}
+            message={"content": "Done", "tool_calls": []},
+            inference_duration_seconds=0.0,
         )
 
         runner = AnnotationRunner(mock_components["config"])
@@ -273,7 +274,8 @@ class TestToolLoop:
         agent = runner_with_mocks["agent"]
 
         agent.chat.return_value = Mock(
-            message={"content": "All done!", "tool_calls": []}
+            message={"content": "All done!", "tool_calls": []},
+            inference_duration_seconds=0.0,
         )
 
         mock_scene = Mock(thread_id=1, last_post_id=10)
@@ -297,8 +299,8 @@ class TestToolLoop:
                     "id": "call_1",
                     "function": {"name": "glossary_create", "arguments": "{}"},
                 }],
-            }),
-            Mock(message={"content": "Done", "tool_calls": []}),
+            }, inference_duration_seconds=0.0),
+            Mock(message={"content": "Done", "tool_calls": []}, inference_duration_seconds=0.0),
         ]
 
         dispatcher.dispatch.return_value = Mock(
@@ -330,8 +332,8 @@ class TestToolLoop:
                     {"id": "call_2", "function": {"name": "glossary_create", "arguments": "{}"}},
                     {"id": "call_3", "function": {"name": "glossary_update", "arguments": "{}"}},
                 ],
-            }),
-            Mock(message={"content": "Done", "tool_calls": []}),
+            }, inference_duration_seconds=0.0),
+            Mock(message={"content": "Done", "tool_calls": []}, inference_duration_seconds=0.0),
         ]
 
         dispatcher.dispatch.side_effect = [
@@ -354,10 +356,13 @@ class TestToolLoop:
         dispatcher = runner_with_mocks["dispatcher"]
 
         # Always return tool calls (never done)
-        agent.chat.return_value = Mock(message={
-            "content": "",
-            "tool_calls": [{"id": "call_1", "function": {"name": "glossary_search", "arguments": "{}"}}],
-        })
+        agent.chat.return_value = Mock(
+            message={
+                "content": "",
+                "tool_calls": [{"id": "call_1", "function": {"name": "glossary_search", "arguments": "{}"}}],
+            },
+            inference_duration_seconds=0.0,
+        )
 
         dispatcher.dispatch.return_value = Mock(
             tool_name="glossary_search",
@@ -384,8 +389,8 @@ class TestToolLoop:
             Mock(message={
                 "content": "",
                 "tool_calls": [{"id": "call_1", "function": {"name": "glossary_update", "arguments": "{}"}}],
-            }),
-            Mock(message={"content": "Done", "tool_calls": []}),
+            }, inference_duration_seconds=0.0),
+            Mock(message={"content": "Done", "tool_calls": []}, inference_duration_seconds=0.0),
         ]
 
         # Tool returns error
@@ -420,8 +425,8 @@ class TestToolLoop:
                     {"id": "call_3", "function": {"name": "glossary_update", "arguments": "{}"}},
                     {"id": "call_4", "function": {"name": "glossary_delete", "arguments": "{}"}},
                 ],
-            }),
-            Mock(message={"content": "Done", "tool_calls": []}),
+            }, inference_duration_seconds=0.0),
+            Mock(message={"content": "Done", "tool_calls": []}, inference_duration_seconds=0.0),
         ]
 
         dispatcher.dispatch.side_effect = [

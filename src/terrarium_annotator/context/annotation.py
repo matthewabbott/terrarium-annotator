@@ -17,7 +17,6 @@ class AnnotationContext:
     """Conversation state and message building."""
 
     system_prompt: str
-    max_turns: int = 12
     conversation_history: list[dict] = field(default_factory=list)
 
     def build_messages(
@@ -35,7 +34,7 @@ class AnnotationContext:
         1. System prompt
         2. Cumulative summary (if provided)
         3. Thread summaries (if provided)
-        4. Recent conversation history (limited to max_turns)
+        4. Full conversation history (compaction handles size limits)
         5. User message with current scene and relevant glossary entries
 
         Args:
@@ -70,9 +69,8 @@ class AnnotationContext:
                 }
             )
 
-        # Add conversation history (limited to max_turns)
-        recent_turns = self.conversation_history[-self.max_turns :]
-        messages.extend(recent_turns)
+        # Add full conversation history (compaction manages size)
+        messages.extend(self.conversation_history)
 
         # Build and add user payload with scene + entries
         if current_scene is not None:
@@ -90,6 +88,7 @@ class AnnotationContext:
         content: str,
         *,
         tool_call_id: str | None = None,
+        thread_id: int | None = None,
     ) -> None:
         """Record a conversation turn in history.
 
@@ -98,11 +97,36 @@ class AnnotationContext:
             content: Message content.
             tool_call_id: Required when role='tool', the ID of the tool call
                 being responded to.
+            thread_id: Thread ID to tag this turn for later filtering during
+                compaction. Turns without thread_id are preserved during
+                thread-based compaction.
         """
         turn: dict = {"role": role, "content": content}
         if tool_call_id is not None:
             turn["tool_call_id"] = tool_call_id
+        if thread_id is not None:
+            turn["thread_id"] = thread_id
         self.conversation_history.append(turn)
+
+    def remove_thread_turns(self, thread_id: int) -> int:
+        """Remove all turns belonging to a specific thread.
+
+        Used by compaction to remove old thread's conversation turns
+        after they've been summarized.
+
+        Args:
+            thread_id: The thread ID whose turns should be removed.
+
+        Returns:
+            Number of turns removed.
+        """
+        original_len = len(self.conversation_history)
+        self.conversation_history = [
+            turn
+            for turn in self.conversation_history
+            if turn.get("thread_id") != thread_id
+        ]
+        return original_len - len(self.conversation_history)
 
     def get_history(self) -> list[dict]:
         """Get conversation history (for serialization)."""
@@ -112,7 +136,6 @@ class AnnotationContext:
         """Deep copy for forking (curator, summon)."""
         return AnnotationContext(
             system_prompt=self.system_prompt,
-            max_turns=self.max_turns,
             conversation_history=copy.deepcopy(self.conversation_history),
         )
 
@@ -120,17 +143,13 @@ class AnnotationContext:
         """Serialize to dict for snapshot storage."""
         return {
             "system_prompt": self.system_prompt,
-            "max_turns": self.max_turns,
             "conversation_history": self.conversation_history,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> AnnotationContext:
         """Reconstruct from snapshot data."""
-        ctx = cls(
-            system_prompt=data["system_prompt"],
-            max_turns=data.get("max_turns", 12),
-        )
+        ctx = cls(system_prompt=data["system_prompt"])
         ctx.conversation_history = data.get("conversation_history", [])
         return ctx
 
@@ -169,11 +188,21 @@ class AnnotationContext:
         return "\n".join(lines)
 
     def _format_thread_summaries(self, summaries: list[ThreadSummary]) -> str:
-        """Format thread summaries as XML block."""
+        """Format thread summaries as XML block with entry IDs.
+
+        Entry IDs help the agent know which glossary entries it created/updated
+        in each thread, enabling proper updates (e.g., renaming 'weird sphere'
+        to 'archeota' when the proper name is discovered).
+        """
         lines = ["<thread_summaries>"]
         for ts in summaries:
+            # Include entry IDs if any were created/updated
+            entries_attr = ""
+            if ts.entries_created or ts.entries_updated:
+                all_ids = ts.entries_created + ts.entries_updated
+                entries_attr = f' entries="{",".join(map(str, all_ids))}"'
             lines.append(
-                f'<thread id="{ts.thread_id}" position="{ts.position}">'
+                f'<thread id="{ts.thread_id}" position="{ts.position}"{entries_attr}>'
                 f"{ts.summary_text}</thread>"
             )
         lines.append("</thread_summaries>")

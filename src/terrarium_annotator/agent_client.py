@@ -24,6 +24,7 @@ class AgentResponse:
 
     message: Dict
     raw: Dict
+    inference_duration_seconds: float = 0.0
 
 
 class AgentClient:
@@ -62,13 +63,18 @@ class AgentClient:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
 
+        start_time = time.time()
         data = self._request_with_retry("POST", "/v1/chat/completions", json=payload)
+        duration = time.time() - start_time
+
         try:
             message = data["choices"][0]["message"]
         except (KeyError, IndexError) as exc:
             raise AgentClientError(f"Malformed response: {exc}")
 
-        return AgentResponse(message=message, raw=data)
+        return AgentResponse(
+            message=message, raw=data, inference_duration_seconds=duration
+        )
 
     def health_check(self) -> bool:
         """Return True if the agent server responds with HTTP 200."""
@@ -78,6 +84,25 @@ class AgentClient:
             return resp.ok
         except RequestException:
             return False
+
+    def get_metrics(self) -> Dict:
+        """
+        Fetch metrics from the agent server.
+
+        Returns dict with keys like:
+        - vllm_kv_cache_pct: GPU KV cache usage (0.0-1.0)
+        - vllm_requests_running: Active requests
+        - vllm_requests_waiting: Queued requests
+
+        Returns empty dict on error.
+        """
+        try:
+            resp = self._session.get(f"{self.base_url}/metrics", timeout=5)
+            if resp.ok:
+                return resp.json()
+        except RequestException:
+            pass
+        return {}
 
     def tokenize(self, text: str) -> List[int]:
         """

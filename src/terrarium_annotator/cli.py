@@ -79,8 +79,14 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--context-budget",
         type=int,
-        default=48000,
-        help="Context budget in tokens (default: 48000)",
+        default=98304,
+        help="Context budget in tokens (default: 98304)",
+    )
+    run_parser.add_argument(
+        "--log-file",
+        type=str,
+        default=None,
+        help="Log to file in addition to stderr (for long runs)",
     )
 
     # Export command
@@ -639,12 +645,24 @@ def run(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
     parser = build_parser()
     args = parser.parse_args()
+
+    # Configure logging
+    log_format = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+    handlers: list[logging.Handler] = [logging.StreamHandler()]
+
+    # Add file handler if --log-file specified (only for run command)
+    if args.command == "run" and getattr(args, "log_file", None):
+        file_handler = logging.FileHandler(args.log_file)
+        file_handler.setFormatter(logging.Formatter(log_format))
+        handlers.append(file_handler)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format=log_format,
+        handlers=handlers,
+    )
 
     if args.command == "run":
         run(args)

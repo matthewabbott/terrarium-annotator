@@ -50,7 +50,6 @@ def context() -> AnnotationContext:
     """Create an AnnotationContext for testing."""
     ctx = AnnotationContext(
         system_prompt="You are Terra-annotator.",
-        max_turns=12,
     )
     ctx.record_turn("user", "Process this scene.")
     ctx.record_turn("assistant", "I found a new term.")

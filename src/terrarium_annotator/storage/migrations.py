@@ -223,12 +223,25 @@ MIGRATION_004_REVISION_CASCADE_FIX = Migration(
     ],
 )
 
+# Migration 005: Add completed_thread_ids to snapshot_context for proper resume
+MIGRATION_005_SNAPSHOT_THREAD_IDS = Migration(
+    version=5,
+    name="snapshot_completed_thread_ids",
+    statements=[
+        """
+        ALTER TABLE snapshot_context
+        ADD COLUMN completed_thread_ids TEXT DEFAULT '[]'
+        """,
+    ],
+)
+
 # All migrations in order
 ALL_MIGRATIONS: list[Migration] = [
     MIGRATION_001_INITIAL,
     MIGRATION_002_FTS,
     MIGRATION_003_SNAPSHOT_FK,
     MIGRATION_004_REVISION_CASCADE_FIX,
+    MIGRATION_005_SNAPSHOT_THREAD_IDS,
 ]
 
 

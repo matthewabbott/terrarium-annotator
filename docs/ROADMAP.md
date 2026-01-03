@@ -143,8 +143,8 @@ The existing `codex.py` uses JSON. We will:
 
 ### Scope
 
-1. ThreadSummarizer (hybrid summaries)
-2. ContextCompactor (80% trigger, 70% target)
+1. ThreadSummarizer (hybrid summaries with entry ID tracking)
+2. ContextCompactor (60%/80%/90% thresholds, 4-tier compaction)
 3. Cumulative summary merging
 
 ### Dependencies

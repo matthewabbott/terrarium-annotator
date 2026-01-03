@@ -57,13 +57,17 @@ class TokenCounter:
             return self._heuristic_count(text)
 
     def count_messages(self, messages: list[dict]) -> int:
-        """Count tokens for message list including role overhead."""
+        """Count tokens for message list using heuristic.
+
+        Uses heuristic (chars/4) to avoid spamming the tokenize endpoint.
+        This is accurate enough for budget tracking with 20% headroom.
+        """
         total = 0
 
         for msg in messages:
             content = msg.get("content", "")
             if content:
-                total += self.count(content)
+                total += self._heuristic_count(content)
             total += MESSAGE_OVERHEAD
 
             # Tool calls add extra overhead
@@ -73,9 +77,9 @@ class TokenCounter:
                     name = func.get("name", "")
                     args = func.get("arguments", "")
                     if name:
-                        total += self.count(name)
+                        total += self._heuristic_count(name)
                     if args:
-                        total += self.count(args)
+                        total += self._heuristic_count(args)
                     total += TOOL_CALL_OVERHEAD
 
         return total

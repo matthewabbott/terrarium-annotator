@@ -39,32 +39,49 @@ class TestContextCompactor:
         return summarizer
 
     def test_should_compact_above_trigger(self, mock_counter, mock_summarizer):
-        """Should trigger at 80% of budget."""
+        """Rolling compaction triggers at 80% of budget."""
         compactor = ContextCompactor(
             token_counter=mock_counter,
             summarizer=mock_summarizer,
-            context_budget=10000,  # trigger at 8000
+            context_budget=10000,  # rolling at 8000, emergency at 9000
         )
 
+        # Above 80% - should trigger rolling compaction
         mock_counter.count_messages.return_value = 8500
         assert compactor.should_compact([]) is True
 
+        # Below 80% - no compaction
         mock_counter.count_messages.return_value = 7500
         assert compactor.should_compact([]) is False
 
     def test_should_compact_at_boundary(self, mock_counter, mock_summarizer):
-        """Should trigger exactly at 80%."""
+        """Thread compact at 80%, should_compact also at 80%."""
         compactor = ContextCompactor(
             token_counter=mock_counter,
             summarizer=mock_summarizer,
             context_budget=10000,
         )
 
+        # Thread compact triggers at 80%
         mock_counter.count_messages.return_value = 8000
-        assert compactor.should_compact([]) is False  # Equal to trigger, not above
+        assert compactor.should_compact_thread([]) is False
+
+        mock_counter.count_messages.return_value = 8001
+        assert compactor.should_compact_thread([]) is True
+
+        # should_compact() now uses same 80% threshold for rolling compaction
+        mock_counter.count_messages.return_value = 8000
+        assert compactor.should_compact([]) is False
 
         mock_counter.count_messages.return_value = 8001
         assert compactor.should_compact([]) is True
+
+        # Emergency compact (tiers 2-4) triggers at 90%
+        mock_counter.count_messages.return_value = 9000
+        assert compactor.should_emergency_compact([]) is False
+
+        mock_counter.count_messages.return_value = 9001
+        assert compactor.should_emergency_compact([]) is True
 
     def test_tier1_summarizes_oldest_thread(self, mock_counter, mock_summarizer):
         """Tier 1: Should summarize oldest completed thread."""
@@ -98,8 +115,9 @@ class TestContextCompactor:
         mock_summarizer.summarize_thread.assert_not_called()
 
     def test_tier2_merges_summaries(self, mock_counter, mock_summarizer):
-        """Tier 2: Should merge old summaries."""
-        mock_counter.count_messages.side_effect = [9000, 6000]
+        """Tier 2: Should merge old summaries (emergency only >90%)."""
+        # Need >9000 to trigger emergency mode for tier 2
+        mock_counter.count_messages.side_effect = [9100, 6000]
 
         compactor = ContextCompactor(
             mock_counter, mock_summarizer, context_budget=10000
@@ -142,9 +160,9 @@ class TestContextCompactor:
         assert result.summaries_merged == 0
 
     def test_tier3_trims_thinking(self, mock_counter, mock_summarizer):
-        """Tier 3: Should trim thinking blocks from old messages."""
-        # First call above target, second below
-        mock_counter.count_messages.side_effect = [9000, 6000]
+        """Tier 3: Should trim thinking blocks from old messages (emergency only)."""
+        # Need >9000 to trigger emergency mode for tier 3
+        mock_counter.count_messages.side_effect = [9100, 6000]
 
         compactor = ContextCompactor(
             mock_counter, mock_summarizer, context_budget=10000
@@ -190,8 +208,9 @@ class TestContextCompactor:
         assert "<thinking>" in result_messages[0]["content"]
 
     def test_tier4_truncates_responses(self, mock_counter, mock_summarizer):
-        """Tier 4: Should truncate old long responses."""
-        mock_counter.count_messages.side_effect = [9000, 6000]
+        """Tier 4: Should truncate old long responses (emergency only)."""
+        # Need >9000 to trigger emergency mode for tier 4
+        mock_counter.count_messages.side_effect = [9100, 6000]
 
         compactor = ContextCompactor(
             mock_counter, mock_summarizer, context_budget=10000
@@ -268,9 +287,9 @@ class TestContextCompactor:
         assert result.final_tokens == 9000
 
     def test_result_tracks_all_operations(self, mock_counter, mock_summarizer):
-        """Result should track counts from all tiers."""
-        # Multiple iterations needed
-        mock_counter.count_messages.side_effect = [9000, 8500, 8000, 6000]
+        """Result should track counts from all tiers (emergency mode)."""
+        # Multiple iterations needed, >9000 for emergency mode
+        mock_counter.count_messages.side_effect = [9100, 8500, 8000, 6000]
 
         compactor = ContextCompactor(
             mock_counter, mock_summarizer, context_budget=10000
@@ -292,21 +311,30 @@ class TestContextCompactor:
         result_messages, result = compactor.compact(messages, state)
 
         # Should have done multiple operations
-        assert result.initial_tokens == 9000
+        assert result.initial_tokens == 9100
         assert result.final_tokens == 6000
         assert result.target_reached is True
 
     def test_custom_thresholds(self, mock_counter, mock_summarizer):
-        """Should respect custom trigger and target ratios."""
+        """Should respect custom threshold ratios."""
         compactor = ContextCompactor(
             mock_counter,
             mock_summarizer,
             context_budget=10000,
-            trigger_ratio=0.50,  # Trigger at 5000
+            thread_compact_ratio=0.50,  # Thread compact at 5000
+            emergency_ratio=0.70,  # Emergency at 7000
             target_ratio=0.30,  # Target 3000
         )
 
+        # Thread compact at 50%
         mock_counter.count_messages.return_value = 5500
+        assert compactor.should_compact_thread([]) is True
+
+        mock_counter.count_messages.return_value = 4500
+        assert compactor.should_compact_thread([]) is False
+
+        # Emergency at 70%
+        mock_counter.count_messages.return_value = 7500
         assert compactor.should_compact([]) is True
 
         mock_counter.count_messages.return_value = 4500

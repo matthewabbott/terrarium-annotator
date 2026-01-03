@@ -50,7 +50,6 @@ def context() -> AnnotationContext:
     """Create an AnnotationContext for testing."""
     ctx = AnnotationContext(
         system_prompt="You are Terra-annotator.",
-        max_turns=12,
     )
     ctx.record_turn("user", "Process this scene.")
     ctx.record_turn("assistant", "I found a new term.")
@@ -103,11 +102,13 @@ class TestSnapshotDataclasses:
             thread_summaries=[{"thread_id": 1}],
             conversation_history=[{"role": "user", "content": "Hi"}],
             current_thread_id=5,
+            completed_thread_ids=[1, 2, 3],
         )
         assert ctx.snapshot_id == 1
         assert ctx.system_prompt == "You are an annotator."
         assert len(ctx.thread_summaries) == 1
         assert len(ctx.conversation_history) == 1
+        assert ctx.completed_thread_ids == [1, 2, 3]
 
     def test_snapshot_entry_fields(self):
         entry = SnapshotEntry(
@@ -502,7 +503,6 @@ class TestSerializationRoundtrip:
         """AnnotationContext should survive to_dict/from_dict."""
         original = AnnotationContext(
             system_prompt="Test prompt",
-            max_turns=8,
         )
         original.record_turn("user", "Hello")
         original.record_turn("assistant", "Hi there")
@@ -511,7 +511,6 @@ class TestSerializationRoundtrip:
         restored = AnnotationContext.from_dict(data)
 
         assert restored.system_prompt == original.system_prompt
-        assert restored.max_turns == original.max_turns
         assert len(restored.conversation_history) == 2
         assert restored.conversation_history[0]["content"] == "Hello"
 

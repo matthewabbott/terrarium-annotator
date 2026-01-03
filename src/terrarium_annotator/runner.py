@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import logging
 import re
+import signal
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from terrarium_annotator.agent_client import AgentClient, AgentClientError
 from terrarium_annotator.context import (
@@ -47,9 +48,11 @@ class RunnerConfig:
     timeout: int = 120
     resume: bool = True
     max_tool_rounds: int = 10
+    # Context settings
     # Compaction settings (F5)
-    context_budget: int = 48000
-    trigger_ratio: float = 0.80
+    context_budget: int = 98304  # ~98K tokens for long-context annotation
+    thread_compact_ratio: float = 0.80  # Summarize thread at thread boundary
+    emergency_ratio: float = 0.90  # Emergency compact mid-scene
     target_ratio: float = 0.70
     # Curator settings (F6)
     enable_curator: bool = True
@@ -66,6 +69,7 @@ class ToolStats:
     deleted: int = 0
     tool_calls: int = 0
     rounds: int = 0
+    inference_time: float = 0.0
 
 
 @dataclass
@@ -106,7 +110,6 @@ class AnnotationRunner:
         # Context (F2)
         self.context = AnnotationContext(
             system_prompt=TOOL_SYSTEM_PROMPT,
-            max_turns=12,
         )
 
         # Tools (F3)
@@ -134,7 +137,8 @@ class AnnotationRunner:
             summarizer=self.summarizer,
             agent_client=self.agent,
             context_budget=config.context_budget,
-            trigger_ratio=config.trigger_ratio,
+            thread_compact_ratio=config.thread_compact_ratio,
+            emergency_ratio=config.emergency_ratio,
             target_ratio=config.target_ratio,
         )
         self.compaction_state = CompactionState()
@@ -147,6 +151,11 @@ class AnnotationRunner:
             agent=self.agent,
         )
 
+        # Graceful shutdown support
+        self._shutdown_requested = False
+        self._original_sigint: Any = None
+        self._original_sigterm: Any = None
+
     def close(self) -> None:
         """Close all database connections."""
         self.glossary.close()
@@ -155,6 +164,49 @@ class AnnotationRunner:
         self.corpus.close()
         if self.snapshots is not None:
             self.snapshots.close()
+
+    def _install_signal_handlers(self) -> None:
+        """Install graceful shutdown signal handlers."""
+        self._original_sigint = signal.getsignal(signal.SIGINT)
+        self._original_sigterm = signal.getsignal(signal.SIGTERM)
+        signal.signal(signal.SIGINT, self._handle_shutdown)
+        signal.signal(signal.SIGTERM, self._handle_shutdown)
+
+    def _remove_signal_handlers(self) -> None:
+        """Restore original signal handlers."""
+        if self._original_sigint is not None:
+            signal.signal(signal.SIGINT, self._original_sigint)
+        if self._original_sigterm is not None:
+            signal.signal(signal.SIGTERM, self._original_sigterm)
+
+    def _handle_shutdown(self, signum: int, frame: Any) -> None:
+        """Handle shutdown signal - set flag to stop after current scene."""
+        if self._shutdown_requested:
+            LOGGER.warning("Force quit requested - exiting immediately")
+            raise KeyboardInterrupt
+        self._shutdown_requested = True
+        LOGGER.info("Shutdown requested - will exit after current scene completes")
+
+    def _create_shutdown_checkpoint(self, thread_id: int, last_post_id: int) -> None:
+        """Create checkpoint on graceful shutdown."""
+        if self.snapshots is None:
+            return
+
+        LOGGER.info("Shutdown: creating checkpoint snapshot...")
+        try:
+            snapshot_id = self.snapshots.create(
+                snapshot_type="checkpoint",
+                last_post_id=last_post_id,
+                last_thread_id=thread_id,
+                thread_position=self._thread_position,
+                context=self.context,
+                compaction_state=self.compaction_state,
+                glossary=self.glossary,
+                metadata={"shutdown": True},
+            )
+            LOGGER.info("Shutdown: created checkpoint snapshot %d", snapshot_id)
+        except Exception as e:
+            LOGGER.warning("Shutdown: failed to create checkpoint: %s", e)
 
     def run(self, limit: int | None = None) -> RunResult:
         """
@@ -168,7 +220,11 @@ class AnnotationRunner:
         """
         start_time = time.time()
 
+        # Install graceful shutdown handlers
+        self._install_signal_handlers()
+
         # Get checkpoint for resume
+        # SQLite WAL ensures last_post_id reflects last fully-completed scene
         state = self.progress.get_state()
         start_after_post_id = state.last_post_id if self.config.resume else None
 
@@ -188,6 +244,7 @@ class AnnotationRunner:
         total_updated = 0
         total_deleted = 0
         total_tool_calls = 0
+        total_inference_time = 0.0
         current_thread_id: int | None = None
 
         # Scene iteration
@@ -198,9 +255,14 @@ class AnnotationRunner:
                     self.progress.update_thread_state(
                         current_thread_id, status="completed"
                     )
-                    # Track for compaction (F5)
+                    # Track for compaction (F5) - oldest threads will be summarized
+                    # during rolling compaction in _run_tool_loop when thresholds hit
                     self.compaction_state.completed_thread_ids.append(current_thread_id)
-                    LOGGER.info("Thread %d completed", current_thread_id)
+                    LOGGER.info(
+                        "Thread %d completed (now %d completed threads tracked)",
+                        current_thread_id,
+                        len(self.compaction_state.completed_thread_ids),
+                    )
 
                     # Run curator evaluation (F6)
                     if self.config.enable_curator:
@@ -221,7 +283,8 @@ class AnnotationRunner:
                     # Create checkpoint snapshot (F7) - after curator for clean state
                     self._create_checkpoint(
                         thread_id=current_thread_id,
-                        last_post_id=scene.first_post_id - 1,  # Last post of completed thread
+                        last_post_id=scene.first_post_id
+                        - 1,  # Last post of completed thread
                     )
 
                 current_thread_id = scene.thread_id
@@ -229,7 +292,11 @@ class AnnotationRunner:
                 self.progress.update_thread_state(
                     current_thread_id, status="in_progress"
                 )
-                LOGGER.info("Starting thread %d (position %d)", current_thread_id, self._thread_position)
+                LOGGER.info(
+                    "Starting thread %d (position %d)",
+                    current_thread_id,
+                    self._thread_position,
+                )
 
             LOGGER.info(
                 "Processing scene %d-%d (thread %d, %d posts)",
@@ -238,6 +305,8 @@ class AnnotationRunner:
                 scene.thread_id,
                 scene.post_count,
             )
+
+            scene_start_time = time.time()
 
             # Search for relevant glossary entries
             relevant_entries = self._search_relevant_entries(scene)
@@ -253,8 +322,9 @@ class AnnotationRunner:
             # Log context usage metrics
             tokens, usage_pct = self.compactor.get_current_usage(messages)
             self.compactor.stats.record_usage(usage_pct)
+
             LOGGER.info(
-                "Context: %d/%d tokens (%.1f%%) before scene %d-%d",
+                "Context: %d/%d tokens (%.1f%%) | scene %d-%d",
                 tokens,
                 self.compactor.budget,
                 usage_pct,
@@ -285,17 +355,42 @@ class AnnotationRunner:
             total_updated += tool_stats.updated
             total_deleted += tool_stats.deleted
             total_tool_calls += tool_stats.tool_calls
+            total_inference_time += tool_stats.inference_time
+
+            # Calculate scene timing
+            scene_duration = time.time() - scene_start_time
+
+            # Fetch vLLM KV cache usage after inference
+            metrics = self.agent.get_metrics()
+            kv_cache_pct = metrics.get("vllm_kv_cache_pct", 0.0) * 100
 
             LOGGER.info(
-                "Scene complete: %d tool calls, +%d created, +%d updated",
+                "Scene complete: %.1fs (inference: %.1fs) | %d calls, +%d/~%d | KV: %.1f%%",
+                scene_duration,
+                tool_stats.inference_time,
                 tool_stats.tool_calls,
                 tool_stats.created,
                 tool_stats.updated,
+                kv_cache_pct,
             )
 
             # Check limit
             if limit is not None and scenes_processed >= limit:
                 LOGGER.info("Reached scene limit (%d)", limit)
+                break
+
+            # Check for graceful shutdown
+            if self._shutdown_requested:
+                LOGGER.info(
+                    "Shutdown: completed scene %d-%d, exiting",
+                    scene.first_post_id,
+                    scene.last_post_id,
+                )
+                # Create checkpoint if we're mid-thread
+                if current_thread_id is not None:
+                    self._create_shutdown_checkpoint(
+                        current_thread_id, scene.last_post_id
+                    )
                 break
 
         # Mark final thread if any
@@ -308,15 +403,20 @@ class AnnotationRunner:
         final_state = self.progress.get_state()
 
         LOGGER.info(
-            "Run complete: %d scenes, %d posts, %d entries created, %.1fs",
+            "Run complete: %d scenes, %d posts, %d entries created, %.1fs (inference: %.1fs, %.0f%%)",
             scenes_processed,
             total_posts,
             total_created,
             elapsed,
+            total_inference_time,
+            (total_inference_time / elapsed * 100) if elapsed > 0 else 0,
         )
 
         # Log compaction summary
         LOGGER.info("Compaction stats: %s", self.compactor.stats.summary())
+
+        # Restore original signal handlers
+        self._remove_signal_handlers()
 
         return RunResult(
             scenes_processed=scenes_processed,
@@ -367,7 +467,7 @@ class AnnotationRunner:
         # Combine scene text for search - extract key words only
         scene_text = " ".join(post.body or "" for post in scene.posts[:3])
         # Sanitize for FTS5: keep only alphanumeric and spaces
-        words = re.findall(r'\b[a-zA-Z]{3,}\b', scene_text)
+        words = re.findall(r"\b[a-zA-Z]{3,}\b", scene_text)
         query = " ".join(words[:20])  # Use first 20 words
 
         if not query.strip():
@@ -375,7 +475,7 @@ class AnnotationRunner:
 
         try:
             # Wrap in quotes for safe phrase search
-            safe_query = query.replace('"', '')
+            safe_query = query.replace('"', "")
             return self.glossary.search(f'"{safe_query}"', limit=10)
         except Exception as e:
             LOGGER.warning("Glossary search failed: %s", e)
@@ -399,14 +499,25 @@ class AnnotationRunner:
         stats = ToolStats()
         tools = self.dispatcher.get_tool_definitions()
         current_messages = list(messages)  # Copy to preserve original
+        initial_len = len(messages)  # Track where new messages start
+
+        # Record the user message (scene content) to conversation history
+        # Tag with thread_id for later compaction filtering
+        if messages:
+            user_msg = messages[-1]  # Last message is user payload
+            if user_msg.get("role") == "user":
+                self.context.record_turn(
+                    "user", user_msg["content"], thread_id=scene.thread_id
+                )
 
         for round_num in range(self.config.max_tool_rounds):
             stats.rounds = round_num + 1
 
             # Check compaction before agent call (F5)
+            # Rolling compaction: summarize oldest threads, preserve recent context
             if self.compactor.should_compact(current_messages):
                 current_messages, compact_result = self.compactor.compact(
-                    current_messages, self.compaction_state
+                    current_messages, self.compaction_state, self.context
                 )
                 LOGGER.info(
                     "Compacted: %d -> %d tokens (target reached: %s)",
@@ -423,6 +534,13 @@ class AnnotationRunner:
                 max_tokens=self.config.max_tokens,
             )
 
+            stats.inference_time += response.inference_duration_seconds
+            LOGGER.info(
+                "Inference: %.2fs (round %d)",
+                response.inference_duration_seconds,
+                round_num + 1,
+            )
+
             message = response.message
 
             # Check for tool calls
@@ -430,9 +548,10 @@ class AnnotationRunner:
 
             if not tool_calls:
                 # No tool calls - agent is done
+                # Record final assistant message if present
                 content = message.get("content", "")
                 if content:
-                    self.context.record_turn("assistant", content)
+                    current_messages.append({"role": "assistant", "content": content})
                 LOGGER.debug("Tool loop complete after %d rounds", stats.rounds)
                 break
 
@@ -480,5 +599,12 @@ class AnnotationRunner:
                 scene.first_post_id,
                 scene.last_post_id,
             )
+
+        # Sync all new messages (assistant + tool) to conversation history
+        # Tag with thread_id for later compaction filtering
+        for msg in current_messages[initial_len:]:
+            if msg["role"] in ("assistant", "tool"):
+                msg["thread_id"] = scene.thread_id
+                self.context.conversation_history.append(msg)
 
         return stats

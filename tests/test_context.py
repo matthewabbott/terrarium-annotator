@@ -286,7 +286,7 @@ class TestAnnotationContext:
         assert len(ctx.conversation_history) == 1
 
     def test_clone_creates_independent_copy(self):
-        ctx = NewAnnotationContext(system_prompt="Test", max_turns=5)
+        ctx = NewAnnotationContext(system_prompt="Test")
         ctx.record_turn("user", "Original")
 
         clone = ctx.clone()
@@ -295,7 +295,6 @@ class TestAnnotationContext:
         assert len(ctx.conversation_history) == 1
         assert len(clone.conversation_history) == 2
         assert clone.system_prompt == "Test"
-        assert clone.max_turns == 5
 
     def test_clone_deep_copies_history(self):
         ctx = NewAnnotationContext(system_prompt="Test")
@@ -308,24 +307,6 @@ class TestAnnotationContext:
 
         # Original should be unaffected
         assert ctx.conversation_history[0]["metadata"]["key"] == "value"
-
-    def test_max_turns_limits_history(self, sample_scene):
-        ctx = NewAnnotationContext(system_prompt="Test", max_turns=2)
-
-        for i in range(5):
-            ctx.record_turn("user", f"Message {i}")
-            ctx.record_turn("assistant", f"Response {i}")
-
-        messages = ctx.build_messages(current_scene=sample_scene)
-
-        # Count turns in messages (excluding system messages and final user payload)
-        turn_count = sum(
-            1
-            for m in messages
-            if m["role"] in ("user", "assistant")
-            and "<story_passages>" not in m.get("content", "")
-        )
-        assert turn_count == 2
 
     def test_build_messages_without_scene(self):
         """Should work without a scene (no user message added)."""

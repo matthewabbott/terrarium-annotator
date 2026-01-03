@@ -305,30 +305,50 @@ class AnnotationContext:
 
 ```python
 class ContextCompactor:
-    """Manage context size via summarization and pruning."""
+    """Rolling context compaction with smart thresholds.
+
+    Thresholds:
+    - <60%: No compaction needed
+    - ≥80%: Loop Tier 1 (summarize threads) until <60%
+    - >3 summaries: Tier 2 merges oldest into cumulative
+    - ≥90%: Emergency Tiers 3-4 (trim thinking, truncate)
+    """
 
     def __init__(
         self,
         token_counter: TokenCounter,
-        agent_client: AgentClient,
-        max_tokens: int,
-        trigger_ratio: float = 0.8,
-        target_ratio: float = 0.7
+        summarizer: ThreadSummarizer,
+        agent_client: AgentClient | None = None,
+        context_budget: int = 16000,
+        soft_ratio: float = 0.60,
+        thread_compact_ratio: float = 0.80,
+        emergency_ratio: float = 0.90,
+        target_ratio: float = 0.70
     ) -> None: ...
 
-    def should_compact(self, context: AnnotationContext) -> bool:
-        """Check if context exceeds trigger threshold."""
+    def should_compact(self, messages: list[dict]) -> bool:
+        """Check if over 80% (rolling compaction threshold)."""
+
+    def should_emergency_compact(self, messages: list[dict]) -> bool:
+        """Check if emergency compaction should trigger (≥90%)."""
 
     def compact(
         self,
-        context: AnnotationContext,
-        thread_summaries: list[ThreadSummary]
-    ) -> tuple[AnnotationContext, list[ThreadSummary]]:
+        messages: list[dict],
+        state: CompactionState,
+        context: AnnotationContext | None = None
+    ) -> tuple[list[dict], CompactionResult]:
         """
-        Reduce context size to target ratio.
+        Apply rolling compaction with smart thresholds.
 
-        Returns: (updated_context, updated_summaries)
+        Modifies BOTH messages AND context.conversation_history
+        so changes persist across scenes.
+
+        Returns: (compacted_messages, CompactionResult)
         """
+
+    def get_current_usage(self, messages: list[dict]) -> tuple[int, float]:
+        """Get current token count and usage percentage."""
 ```
 
 ### ThreadSummarizer

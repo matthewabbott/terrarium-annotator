@@ -43,6 +43,7 @@ class SnapshotContext:
     thread_summaries: list[dict]  # Serialized ThreadSummary dicts
     conversation_history: list[dict]
     current_thread_id: int | None
+    completed_thread_ids: list[int]  # For proper Tier 1 compaction on resume
 
 
 @dataclass
@@ -136,8 +137,9 @@ class SnapshotStore:
                     """
                     INSERT INTO snapshot_context (
                         snapshot_id, system_prompt, cumulative_summary,
-                        thread_summaries, conversation_history, current_thread_id
-                    ) VALUES (?, ?, ?, ?, ?, ?)
+                        thread_summaries, conversation_history, current_thread_id,
+                        completed_thread_ids
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         snapshot_id,
@@ -146,6 +148,7 @@ class SnapshotStore:
                         json.dumps(compaction_dict.get("thread_summaries", [])),
                         json.dumps(context_dict.get("conversation_history", [])),
                         last_thread_id,
+                        json.dumps(compaction_dict.get("completed_thread_ids", [])),
                     ),
                 )
 
@@ -208,7 +211,8 @@ class SnapshotStore:
             cursor = self.conn.execute(
                 """
                 SELECT snapshot_id, system_prompt, cumulative_summary,
-                       thread_summaries, conversation_history, current_thread_id
+                       thread_summaries, conversation_history, current_thread_id,
+                       completed_thread_ids
                 FROM snapshot_context
                 WHERE snapshot_id = ?
                 """,
@@ -225,6 +229,7 @@ class SnapshotStore:
                 thread_summaries=json.loads(row["thread_summaries"]),
                 conversation_history=json.loads(row["conversation_history"]),
                 current_thread_id=row["current_thread_id"],
+                completed_thread_ids=json.loads(row["completed_thread_ids"] or "[]"),
             )
         except sqlite3.Error as e:
             raise DatabaseError(f"Get snapshot context {snapshot_id} failed: {e}") from e
@@ -367,7 +372,7 @@ class SnapshotStore:
         compaction = CompactionState.from_dict({
             "cumulative_summary": ctx_data.cumulative_summary or "",
             "thread_summaries": ctx_data.thread_summaries,
-            "completed_thread_ids": [],  # Not stored, will be empty on restore
+            "completed_thread_ids": ctx_data.completed_thread_ids,
         })
 
         return context, compaction

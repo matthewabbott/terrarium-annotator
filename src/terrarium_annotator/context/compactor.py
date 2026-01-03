@@ -13,6 +13,7 @@ from terrarium_annotator.context.prompts import CUMULATIVE_SUMMARY_PROMPT
 
 if TYPE_CHECKING:
     from terrarium_annotator.agent_client import AgentClient
+    from terrarium_annotator.context.annotation import AnnotationContext
     from terrarium_annotator.context.summarizer import ThreadSummarizer
     from terrarium_annotator.context.token_counter import TokenCounter
 
@@ -55,8 +56,7 @@ class CompactionState:
         state = cls()
         state.cumulative_summary = data.get("cumulative_summary", "")
         state.thread_summaries = [
-            ThreadSummary.from_dict(ts)
-            for ts in data.get("thread_summaries", [])
+            ThreadSummary.from_dict(ts) for ts in data.get("thread_summaries", [])
         ]
         state.completed_thread_ids = data.get("completed_thread_ids", [])
         return state
@@ -64,17 +64,31 @@ class CompactionState:
 
 class ContextCompactor:
     """
-    4-tier context compaction algorithm.
+    Rolling context compaction with smart thresholds.
 
-    Tiers (applied in order):
-    1. Summarize oldest completed thread
-    2. Merge old summaries into cumulative summary
-    3. Trim thinking tokens from old turns (preserve recent 4)
-    4. Truncate old assistant responses (max 500 chars)
+    Context structure after compaction:
+    ┌─────────────────────────────────────────────────────────────┐
+    │ cumulative_summary: "The Story So Far" (merged summaries)   │
+    ├─────────────────────────────────────────────────────────────┤
+    │ thread_summaries: [Thread N, N+1, N+2] (3 recent, with IDs) │
+    ├─────────────────────────────────────────────────────────────┤
+    │ Full conversation: recent threads                           │
+    └─────────────────────────────────────────────────────────────┘
 
     Thresholds:
-    - Trigger: 80% of context budget
-    - Target: 70% of context budget
+    - Under 60%: No compaction needed
+    - ≥80%: Loop Tier 1 until <60% (summarize oldest threads)
+    - >3 summaries: Tier 2 merges oldest into cumulative
+    - ≥90%: Emergency Tiers 3-4 (trim thinking, truncate)
+
+    Tiers:
+    1. Summarize oldest completed thread → add to thread_summaries
+    2. Merge oldest 2 summaries into cumulative (keeps 3 recent with entry IDs)
+    3. Trim <thinking> blocks from old messages (emergency)
+    4. Truncate old assistant responses (emergency)
+
+    Key insight: Compaction modifies BOTH the messages list AND the
+    underlying conversation_history, so changes persist across scenes.
     """
 
     def __init__(
@@ -83,7 +97,9 @@ class ContextCompactor:
         summarizer: ThreadSummarizer,
         agent_client: AgentClient | None = None,
         context_budget: int = 16000,
-        trigger_ratio: float = 0.80,
+        soft_ratio: float = 0.60,
+        thread_compact_ratio: float = 0.80,
+        emergency_ratio: float = 0.90,
         target_ratio: float = 0.70,
     ) -> None:
         """
@@ -94,50 +110,77 @@ class ContextCompactor:
             summarizer: ThreadSummarizer for tier 1.
             agent_client: Optional AgentClient for tier 2 summary merging.
             context_budget: Total context budget in tokens.
-            trigger_ratio: Ratio at which to trigger compaction.
-            target_ratio: Target ratio after compaction.
+            soft_ratio: Under this, skip compaction entirely (default 60%).
+            thread_compact_ratio: Enable rolling compaction (default 80%).
+            emergency_ratio: Emergency compaction with all tiers (default 90%).
+            target_ratio: Target ratio after compaction (default 70%).
         """
         self.counter = token_counter
         self.summarizer = summarizer
         self.agent = agent_client
         self.budget = context_budget
-        self.trigger = int(context_budget * trigger_ratio)
+        self.soft_threshold = int(context_budget * soft_ratio)
+        self.thread_compact_threshold = int(context_budget * thread_compact_ratio)
+        self.emergency_threshold = int(context_budget * emergency_ratio)
         self.target = int(context_budget * target_ratio)
         self._stats = CompactionStats()
 
-    def should_compact(self, messages: list[dict]) -> bool:
-        """Check if compaction should be triggered."""
+    def should_compact_thread(self, messages: list[dict]) -> bool:
+        """Check if thread compaction should happen (at thread boundary)."""
         tokens = self.counter.count_messages(messages)
-        should = tokens > self.trigger
+        return tokens > self.thread_compact_threshold
+
+    def should_emergency_compact(self, messages: list[dict]) -> bool:
+        """Check if emergency compaction should trigger."""
+        tokens = self.counter.count_messages(messages)
+        should = tokens > self.emergency_threshold
         if should:
-            LOGGER.debug(
-                "Compaction triggered: %d tokens > %d trigger",
+            LOGGER.warning(
+                "Emergency compaction triggered: %d tokens > %d threshold",
                 tokens,
-                self.trigger,
+                self.emergency_threshold,
             )
         return should
+
+    def should_compact(self, messages: list[dict]) -> bool:
+        """Check if any compaction should trigger.
+
+        Returns True if over 80% (rolling compaction threshold).
+        """
+        tokens = self.counter.count_messages(messages)
+        return tokens > self.thread_compact_threshold
 
     def compact(
         self,
         messages: list[dict],
         state: CompactionState,
-        thread_conversation: dict[int, list[dict]] | None = None,
+        context: AnnotationContext | None = None,
     ) -> tuple[list[dict], CompactionResult]:
         """
-        Apply 4-tier compaction until target reached or no more options.
+        Apply rolling compaction with smart thresholds.
+
+        Compaction modifies BOTH the messages list AND the underlying
+        conversation_history in context, so changes persist across scenes.
+
+        Thresholds:
+        - Under 60%: Skip compaction entirely
+        - 60-80%: No compaction needed (under target)
+        - ≥80%: Loop Tier 1 (summarize oldest threads) until <60%
+        - >3 summaries: Tier 2 merges oldest into cumulative (keeps 3 recent)
+        - ≥90%: Emergency with Tiers 3-4 (trim thinking, truncate)
 
         Args:
             messages: Current message list (will be copied, not mutated).
             state: Compaction state with summaries and completed threads.
-            thread_conversation: Optional map of thread_id to conversation excerpt.
+            context: AnnotationContext to modify for persistent history changes.
 
         Returns:
             Tuple of (compacted messages, CompactionResult).
         """
         messages = list(messages)  # Work on copy
-        thread_conversation = thread_conversation or {}
 
         initial_tokens = self.counter.count_messages(messages)
+        usage_pct = (initial_tokens / self.budget) * 100 if self.budget > 0 else 0
         result = CompactionResult(
             initial_tokens=initial_tokens,
             final_tokens=initial_tokens,
@@ -149,21 +192,43 @@ class ContextCompactor:
         )
 
         current_tokens = initial_tokens
+
+        # Under 60%: Skip compaction entirely - we have plenty of room
+        if current_tokens < self.soft_threshold:
+            result.target_reached = True
+            LOGGER.debug(
+                "Skipping compaction: %d tokens (%.1f%%) < 60%% threshold",
+                current_tokens,
+                usage_pct,
+            )
+            return messages, result
+
+        # Determine how aggressive to be
+        is_emergency = current_tokens > self.emergency_threshold
         max_iterations = 20  # Safety limit
 
-        for _ in range(max_iterations):
+        for iteration in range(max_iterations):
             if current_tokens <= self.target:
                 result.target_reached = True
                 break
 
             # Tier 1: Summarize oldest completed thread
+            # Only if we have 2+ completed threads (preserve current thread's context)
             if len(state.completed_thread_ids) > 1:
                 oldest_id = state.completed_thread_ids.pop(0)
-                LOGGER.debug("Tier 1: Summarizing thread %d", oldest_id)
+                LOGGER.info(
+                    "Tier 1: Summarizing thread %d (%d completed remain)",
+                    oldest_id,
+                    len(state.completed_thread_ids),
+                )
 
+                # Get conversation excerpt for this thread from messages
+                thread_messages = [
+                    m for m in messages if m.get("thread_id") == oldest_id
+                ]
                 summary_result = self.summarizer.summarize_thread(
                     oldest_id,
-                    thread_conversation.get(oldest_id, []),
+                    thread_messages,
                 )
                 state.thread_summaries.append(
                     self.summarizer.to_thread_summary(
@@ -171,15 +236,31 @@ class ContextCompactor:
                         position=len(state.thread_summaries),
                     )
                 )
+
+                # Remove from messages AND persistent history
                 messages = self._remove_thread_turns(messages, oldest_id)
+                if context is not None:
+                    removed = context.remove_thread_turns(oldest_id)
+                    LOGGER.debug(
+                        "Removed %d turns from conversation history for thread %d",
+                        removed,
+                        oldest_id,
+                    )
+
                 result.threads_summarized += 1
                 result.highest_tier = max(result.highest_tier, 1)
                 current_tokens = self.counter.count_messages(messages)
+
+                # At 80%: Keep looping Tier 1 until under 60% (soft threshold)
+                if current_tokens < self.soft_threshold:
+                    result.target_reached = True
+                    break
                 continue
 
-            # Tier 2: Merge old summaries into cumulative
+            # Tier 2: Merge old summaries into cumulative (runs when >3 summaries)
+            # NOT emergency-only - keeps exactly 3 recent summaries with entry IDs
             if len(state.thread_summaries) > 3:
-                LOGGER.debug("Tier 2: Merging old summaries")
+                LOGGER.info("Tier 2: Merging old summaries into cumulative")
                 oldest_summaries = state.thread_summaries[:2]
                 state.thread_summaries = state.thread_summaries[2:]
                 state.cumulative_summary = self._merge_summaries(
@@ -187,14 +268,17 @@ class ContextCompactor:
                 )
                 result.summaries_merged += 2
                 result.highest_tier = max(result.highest_tier, 2)
-                # Token reduction comes from having fewer separate summaries
                 current_tokens = self.counter.count_messages(messages)
                 continue
+
+            # Below here: emergency-only tiers (90%+ threshold)
+            if not is_emergency:
+                break
 
             # Tier 3: Trim thinking tokens (preserve recent 4)
             trimmed, count = self._trim_thinking(messages, preserve_recent=4)
             if count > 0:
-                LOGGER.debug("Tier 3: Trimmed %d thinking blocks", count)
+                LOGGER.info("Tier 3: Trimmed %d thinking blocks", count)
                 messages = trimmed
                 result.turns_trimmed += count
                 result.highest_tier = max(result.highest_tier, 3)
@@ -206,7 +290,7 @@ class ContextCompactor:
                 messages, max_age=8, max_len=500
             )
             if count > 0:
-                LOGGER.debug("Tier 4: Truncated %d old responses", count)
+                LOGGER.info("Tier 4: Truncated %d old responses", count)
                 messages = truncated
                 result.responses_truncated += count
                 result.highest_tier = max(result.highest_tier, 4)
@@ -231,12 +315,13 @@ class ContextCompactor:
             )
 
         LOGGER.info(
-            "Compaction: %d -> %d tokens (target: %d, reached: %s, tier: %d)",
+            "Compaction: %d -> %d tokens (%.1f%% -> %.1f%%, tier: %d, target: %s)",
             initial_tokens,
             current_tokens,
-            self.target,
-            result.target_reached,
+            (initial_tokens / self.budget) * 100,
+            (current_tokens / self.budget) * 100,
             result.highest_tier,
+            result.target_reached,
         )
 
         return messages, result
@@ -252,19 +337,15 @@ class ContextCompactor:
         usage_percent = (tokens / self.budget) * 100 if self.budget > 0 else 0.0
         return tokens, usage_percent
 
-    def _remove_thread_turns(
-        self, messages: list[dict], thread_id: int
-    ) -> list[dict]:
-        """Remove turns for a summarized thread."""
-        # Filter out messages tagged with this thread_id
-        # For now, we don't have thread tagging in messages,
-        # so this is a no-op placeholder
-        # TODO: Tag messages with thread_id in runner for proper filtering
-        return messages
+    def _remove_thread_turns(self, messages: list[dict], thread_id: int) -> list[dict]:
+        """Remove turns for a summarized thread.
 
-    def _merge_summaries(
-        self, cumulative: str, summaries: list[ThreadSummary]
-    ) -> str:
+        Filters out messages tagged with this thread_id.
+        Messages without thread_id are preserved.
+        """
+        return [m for m in messages if m.get("thread_id") != thread_id]
+
+    def _merge_summaries(self, cumulative: str, summaries: list[ThreadSummary]) -> str:
         """Merge thread summaries into cumulative summary."""
         # Format summaries
         summary_texts = []
