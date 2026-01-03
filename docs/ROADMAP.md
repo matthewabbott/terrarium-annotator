@@ -392,6 +392,38 @@ See `docs/worklog/` for session notes.
 
 ---
 
+## Aspirational / Future Work
+
+These are potential follow-up features, not on the immediate docket.
+
+### Glossary Curation Mode
+
+A dedicated curator agent for reviewing/consolidating the glossary (not reading the story):
+
+- **Entry revision history CLI** (`inspect entry <id> --history`)
+  - Show diffs with old/new values
+  - Blame: which post triggered each change
+- **Entry-specific snapshot summoning** (`summon_entry_context(entry_id)`)
+  - Auto-find snapshot closest to entry's last revision
+  - Interrogate the "ghost" about why it made that change
+- **Snapshot ↔ revision linking**
+  - Peg snapshots to blame diffs
+  - "Show me the context when this field changed"
+- **Corpus access for curator** (`read_post` tool)
+  - Let curator read specific posts when investigating entries
+- **Bulk operations**
+  - Merge duplicate entries
+  - Re-tag entries
+  - Purge low-quality entries
+
+### Other Future Items
+
+- **Semantic embeddings** for glossary terms (similarity search, clustering)
+- **Multi-corpus expansion** (abstract corpus layer, adapters beyond banished.db)
+- **Benchmark harness** for measuring annotation quality
+
+---
+
 ## Legacy Roadmap Items
 
 The following items from the original roadmap are covered by the new feature breakdown:
