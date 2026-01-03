@@ -250,6 +250,18 @@ class AnnotationRunner:
                 thread_summaries=self.compaction_state.thread_summaries or None,
             )
 
+            # Log context usage metrics
+            tokens, usage_pct = self.compactor.get_current_usage(messages)
+            self.compactor.stats.record_usage(usage_pct)
+            LOGGER.info(
+                "Context: %d/%d tokens (%.1f%%) before scene %d-%d",
+                tokens,
+                self.compactor.budget,
+                usage_pct,
+                scene.first_post_id,
+                scene.last_post_id,
+            )
+
             # Execute tool loop
             try:
                 tool_stats = self._run_tool_loop(messages, scene)
@@ -302,6 +314,9 @@ class AnnotationRunner:
             total_created,
             elapsed,
         )
+
+        # Log compaction summary
+        LOGGER.info("Compaction stats: %s", self.compactor.stats.summary())
 
         return RunResult(
             scenes_processed=scenes_processed,

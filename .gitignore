@@ -25,3 +25,4 @@ data/
 .coverage
 htmlcov/*.db
 *.db-*
+data/

@@ -4,3 +4,12 @@ sqlite3 banished.db
 .output ayylmao.txt
 SELECT post.body FROM post LEFT JOIN tag ON (post.id = tag.post_id) WHERE tag.name = 'story_post' ORDER BY post.time ASC;
 .exit
+
+
+tmux new -t annotator
+.venv/bin/python -m terrarium_annotator.cli run \
+--corpus-db banished.db \
+--annotator-db annotator.db
+
+tmux new -t annotator_status
+watch -n 30 '.venv/bin/python -m terrarium_annotator.cli status'

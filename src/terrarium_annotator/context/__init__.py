@@ -6,6 +6,7 @@ from terrarium_annotator.context.compactor import (
     CompactionState,
     ContextCompactor,
 )
+from terrarium_annotator.context.metrics import CompactionStats, ContextMetrics
 from terrarium_annotator.context.models import ThreadSummary
 from terrarium_annotator.context.prompts import (
     CUMULATIVE_SUMMARY_PROMPT,
@@ -23,7 +24,9 @@ __all__ = [
     "AnnotationContext",
     "CompactionResult",
     "CompactionState",
+    "CompactionStats",
     "ContextCompactor",
+    "ContextMetrics",
     "CUMULATIVE_SUMMARY_PROMPT",
     "NewAnnotationContext",  # Alias for backwards compatibility
     "SummaryResult",

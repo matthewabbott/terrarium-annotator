@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from terrarium_annotator.context.metrics import CompactionStats
 from terrarium_annotator.context.models import ThreadSummary
 from terrarium_annotator.context.prompts import CUMULATIVE_SUMMARY_PROMPT
 
@@ -29,6 +30,7 @@ class CompactionResult:
     turns_trimmed: int
     responses_truncated: int
     target_reached: bool
+    highest_tier: int = 0  # 0 = no compaction, 1-4 = tier used
 
 
 @dataclass
@@ -101,6 +103,7 @@ class ContextCompactor:
         self.budget = context_budget
         self.trigger = int(context_budget * trigger_ratio)
         self.target = int(context_budget * target_ratio)
+        self._stats = CompactionStats()
 
     def should_compact(self, messages: list[dict]) -> bool:
         """Check if compaction should be triggered."""
@@ -170,6 +173,7 @@ class ContextCompactor:
                 )
                 messages = self._remove_thread_turns(messages, oldest_id)
                 result.threads_summarized += 1
+                result.highest_tier = max(result.highest_tier, 1)
                 current_tokens = self.counter.count_messages(messages)
                 continue
 
@@ -182,6 +186,7 @@ class ContextCompactor:
                     state.cumulative_summary, oldest_summaries
                 )
                 result.summaries_merged += 2
+                result.highest_tier = max(result.highest_tier, 2)
                 # Token reduction comes from having fewer separate summaries
                 current_tokens = self.counter.count_messages(messages)
                 continue
@@ -192,6 +197,7 @@ class ContextCompactor:
                 LOGGER.debug("Tier 3: Trimmed %d thinking blocks", count)
                 messages = trimmed
                 result.turns_trimmed += count
+                result.highest_tier = max(result.highest_tier, 3)
                 current_tokens = self.counter.count_messages(messages)
                 continue
 
@@ -203,6 +209,7 @@ class ContextCompactor:
                 LOGGER.debug("Tier 4: Truncated %d old responses", count)
                 messages = truncated
                 result.responses_truncated += count
+                result.highest_tier = max(result.highest_tier, 4)
                 current_tokens = self.counter.count_messages(messages)
                 continue
 
@@ -217,15 +224,33 @@ class ContextCompactor:
         result.final_tokens = current_tokens
         result.target_reached = current_tokens <= self.target
 
+        # Update stats
+        if result.highest_tier > 0:
+            self._stats.record_compaction(
+                result.highest_tier, initial_tokens, current_tokens
+            )
+
         LOGGER.info(
-            "Compaction: %d -> %d tokens (target: %d, reached: %s)",
+            "Compaction: %d -> %d tokens (target: %d, reached: %s, tier: %d)",
             initial_tokens,
             current_tokens,
             self.target,
             result.target_reached,
+            result.highest_tier,
         )
 
         return messages, result
+
+    @property
+    def stats(self) -> CompactionStats:
+        """Get compaction statistics."""
+        return self._stats
+
+    def get_current_usage(self, messages: list[dict]) -> tuple[int, float]:
+        """Get current token count and usage percentage."""
+        tokens = self.counter.count_messages(messages)
+        usage_percent = (tokens / self.budget) * 100 if self.budget > 0 else 0.0
+        return tokens, usage_percent
 
     def _remove_thread_turns(
         self, messages: list[dict], thread_id: int
