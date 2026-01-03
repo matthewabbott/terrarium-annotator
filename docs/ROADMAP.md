@@ -381,6 +381,12 @@ Enhancements:
   - Intra-thread scene chunking for long threads
   - Fixed doom loop bug in Tier 4
   - Simplified context structure (immediate thread merge)
+- F8.6 (Verbose Snapshot Inspection) - 2026-01-03
+  - `inspect snapshot <id> --verbose` shows full cumulative/thread/chunk summaries
+  - JSON format includes full content when verbose
+- F9 (Resume from Snapshot) - 2026-01-03
+  - `run --from-snapshot <id>` restores full context state
+  - Resumes annotation from snapshot position
 
 See `docs/worklog/` for session notes.
 

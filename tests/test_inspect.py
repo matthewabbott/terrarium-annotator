@@ -427,3 +427,147 @@ class TestCountByType:
         snapshots.close()
 
         assert counts == {}
+
+
+class TestInspectSnapshot:
+    """Tests for inspect snapshot command with verbose flag."""
+
+    @pytest.fixture
+    def db_with_snapshot(self, populated_db: Path) -> tuple[Path, int]:
+        """Create a database with a snapshot containing summaries."""
+        from terrarium_annotator.context import (
+            AnnotationContext,
+            CompactionState,
+            ThreadSummary,
+        )
+
+        snapshots = SnapshotStore(populated_db)
+        glossary = GlossaryStore(populated_db)
+
+        # Create context with cumulative summary
+        context = AnnotationContext(system_prompt="Test system prompt")
+
+        # Create compaction state with summaries
+        compaction_state = CompactionState(
+            cumulative_summary="The party journeyed through the forest and met the wizard.",
+            thread_summaries=[
+                ThreadSummary(
+                    thread_id=1,
+                    position=0,
+                    summary_text="Party formed in the tavern.",
+                    entries_created=[1, 2],
+                    entries_updated=[],
+                )
+            ],
+        )
+
+        # Create snapshot
+        snapshot_id = snapshots.create(
+            snapshot_type="checkpoint",
+            last_post_id=200,
+            last_thread_id=2,
+            thread_position=1,
+            context=context,
+            compaction_state=compaction_state,
+            glossary=glossary,
+            token_count=5000,
+        )
+
+        snapshots.close()
+        glossary.close()
+
+        return populated_db, snapshot_id
+
+    def test_inspect_snapshot_text(self, db_with_snapshot: tuple[Path, int]):
+        """Show snapshot details in text format."""
+        from terrarium_annotator.cli import inspect_snapshot
+        import argparse
+
+        db_path, snapshot_id = db_with_snapshot
+
+        args = argparse.Namespace(
+            annotator_db=str(db_path),
+            format="text",
+            id=snapshot_id,
+            verbose=False,
+        )
+
+        with mock.patch("sys.stdout", new_callable=StringIO) as mock_stdout:
+            inspect_snapshot(args, db_path)
+            output = mock_stdout.getvalue()
+
+        assert f"Snapshot #{snapshot_id}" in output
+        assert "checkpoint" in output
+        assert "Token count:" in output
+        # Without verbose, should show char count, not content
+        assert "Cumulative summary:" in output
+        assert "The party journeyed" not in output  # Content not shown
+
+    def test_inspect_snapshot_verbose_text(self, db_with_snapshot: tuple[Path, int]):
+        """Show full summaries with --verbose flag in text format."""
+        from terrarium_annotator.cli import inspect_snapshot
+        import argparse
+
+        db_path, snapshot_id = db_with_snapshot
+
+        args = argparse.Namespace(
+            annotator_db=str(db_path),
+            format="text",
+            id=snapshot_id,
+            verbose=True,
+        )
+
+        with mock.patch("sys.stdout", new_callable=StringIO) as mock_stdout:
+            inspect_snapshot(args, db_path)
+            output = mock_stdout.getvalue()
+
+        assert f"Snapshot #{snapshot_id}" in output
+        # Verbose should show actual summary content
+        assert "--- Cumulative Summary ---" in output
+        assert "The party journeyed through the forest" in output
+        assert "--- Thread Summaries" in output
+        assert "Party formed in the tavern" in output
+
+    def test_inspect_snapshot_verbose_json(self, db_with_snapshot: tuple[Path, int]):
+        """Show full summaries with --verbose flag in JSON format."""
+        from terrarium_annotator.cli import inspect_snapshot
+        import argparse
+
+        db_path, snapshot_id = db_with_snapshot
+
+        args = argparse.Namespace(
+            annotator_db=str(db_path),
+            format="json",
+            id=snapshot_id,
+            verbose=True,
+        )
+
+        with mock.patch("sys.stdout", new_callable=StringIO) as mock_stdout:
+            inspect_snapshot(args, db_path)
+            output = mock_stdout.getvalue()
+
+        data = json.loads(output)
+        assert data["snapshot"]["id"] == snapshot_id
+        # Verbose JSON includes full content
+        assert "cumulative_summary" in data["context"]
+        assert "The party journeyed" in data["context"]["cumulative_summary"]
+        assert "thread_summaries" in data["context"]
+        assert len(data["context"]["thread_summaries"]) == 1
+
+    def test_inspect_snapshot_not_found(self, populated_db: Path):
+        """Handle snapshot not found."""
+        from terrarium_annotator.cli import inspect_snapshot
+        import argparse
+
+        args = argparse.Namespace(
+            annotator_db=str(populated_db),
+            format="text",
+            id=9999,
+            verbose=False,
+        )
+
+        with mock.patch("sys.stdout", new_callable=StringIO) as mock_stdout:
+            inspect_snapshot(args, populated_db)
+            output = mock_stdout.getvalue()
+
+        assert "not found" in output

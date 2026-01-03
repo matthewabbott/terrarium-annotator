@@ -58,6 +58,8 @@ class RunnerConfig:
     enable_curator: bool = True
     # Snapshot settings (F7)
     enable_snapshots: bool = True
+    # Resume from snapshot (F9)
+    from_snapshot_id: int | None = None
 
 
 @dataclass
@@ -102,12 +104,13 @@ class AnnotationRunner:
         if config.enable_snapshots:
             self.snapshots = SnapshotStore(config.annotator_db_path)
         self._thread_position = 0  # Track thread ordinal for snapshots
+        self._resume_from_snapshot_post_id: int | None = None  # F9: Resume position
 
         # Corpus components (F1)
         self.corpus = CorpusReader(config.corpus_db_path)
         self.batcher = SceneBatcher(self.corpus)
 
-        # Context (F2)
+        # Context (F2) - may be restored from snapshot below
         self.context = AnnotationContext(
             system_prompt=TOOL_SYSTEM_PROMPT,
         )
@@ -142,6 +145,30 @@ class AnnotationRunner:
             target_ratio=config.target_ratio,
         )
         self.compaction_state = CompactionState()
+
+        # F9: Restore from snapshot if specified
+        if config.from_snapshot_id is not None:
+            if self.snapshots is None:
+                raise ValueError(
+                    "Cannot resume from snapshot: snapshots are disabled"
+                )
+            snapshot = self.snapshots.get(config.from_snapshot_id)
+            if snapshot is None:
+                raise ValueError(
+                    f"Snapshot {config.from_snapshot_id} not found"
+                )
+            # Restore context and compaction state
+            self.context, self.compaction_state = self.snapshots.restore_context(
+                config.from_snapshot_id
+            )
+            # Set resume position from snapshot metadata
+            self._resume_from_snapshot_post_id = snapshot.last_post_id
+            self._thread_position = snapshot.thread_position
+            LOGGER.info(
+                f"Restored from snapshot {config.from_snapshot_id}: "
+                f"post {snapshot.last_post_id}, thread {snapshot.last_thread_id}, "
+                f"position {snapshot.thread_position}"
+            )
 
         # Curator (F6)
         self.curator = CuratorFork(
@@ -226,11 +253,18 @@ class AnnotationRunner:
         # Get checkpoint for resume
         # SQLite WAL ensures last_post_id reflects last fully-completed scene
         state = self.progress.get_state()
-        start_after_post_id = state.last_post_id if self.config.resume else None
+        # F9: Prefer snapshot resume position if set
+        if self._resume_from_snapshot_post_id is not None:
+            start_after_post_id = self._resume_from_snapshot_post_id
+        elif self.config.resume:
+            start_after_post_id = state.last_post_id
+        else:
+            start_after_post_id = None
 
         LOGGER.info(
-            "Starting annotation run (resume=%s, start_after=%s)",
+            "Starting annotation run (resume=%s, from_snapshot=%s, start_after=%s)",
             self.config.resume,
+            self.config.from_snapshot_id,
             start_after_post_id,
         )
 

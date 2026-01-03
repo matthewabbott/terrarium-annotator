@@ -88,6 +88,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Log to file in addition to stderr (for long runs)",
     )
+    run_parser.add_argument(
+        "--from-snapshot",
+        type=int,
+        metavar="ID",
+        help="Resume from snapshot ID (restores full context state)",
+    )
 
     # Export command
     export_parser = subparsers.add_parser("export", help="Export glossary to JSON/YAML")
@@ -149,6 +155,12 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["text", "json"],
         default="text",
         help="Output format (default: text)",
+    )
+    inspect_parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Show full text content instead of summaries",
     )
     inspect_subparsers = inspect_parser.add_subparsers(dest="target", required=True)
 
@@ -400,7 +412,30 @@ def inspect_snapshot(args: argparse.Namespace, db_path: Path) -> None:
         context = store.get_context(args.id)
         entries = store.get_entries(args.id)
 
+        verbose = getattr(args, "verbose", False)
+
         if args.format == "json":
+            context_data: dict = {
+                "system_prompt_length": len(context.system_prompt) if context else 0,
+                "cumulative_summary_length": len(context.cumulative_summary or "")
+                if context
+                else 0,
+                "thread_summaries_count": len(context.thread_summaries)
+                if context
+                else 0,
+                "conversation_history_length": len(context.conversation_history)
+                if context
+                else 0,
+                "current_thread_id": context.current_thread_id if context else None,
+            }
+            # Add full content in verbose mode
+            if verbose and context:
+                context_data["cumulative_summary"] = context.cumulative_summary or ""
+                context_data["thread_summaries"] = context.thread_summaries
+                context_data["chunk_summaries"] = getattr(
+                    context, "chunk_summaries", []
+                )
+
             data = {
                 "snapshot": {
                     "id": snapshot.id,
@@ -413,21 +448,7 @@ def inspect_snapshot(args: argparse.Namespace, db_path: Path) -> None:
                     "context_token_count": snapshot.context_token_count,
                     "metadata": snapshot.metadata,
                 },
-                "context": {
-                    "system_prompt_length": len(context.system_prompt)
-                    if context
-                    else 0,
-                    "cumulative_summary_length": len(context.cumulative_summary or "")
-                    if context
-                    else 0,
-                    "thread_summaries_count": len(context.thread_summaries)
-                    if context
-                    else 0,
-                    "conversation_history_length": len(context.conversation_history)
-                    if context
-                    else 0,
-                    "current_thread_id": context.current_thread_id if context else None,
-                },
+                "context": context_data,
                 "entries_count": len(entries),
             }
             print(json.dumps(data, indent=2))
@@ -455,6 +476,38 @@ def inspect_snapshot(args: argparse.Namespace, db_path: Path) -> None:
                     f"  Conversation history: {len(context.conversation_history)} messages"
                 )
                 print(f"  Current thread:       {context.current_thread_id}")
+
+                # Verbose mode: show actual content
+                if verbose:
+                    print()
+                    print("--- Cumulative Summary ---")
+                    print(context.cumulative_summary or "(empty)")
+
+                    if context.thread_summaries:
+                        print()
+                        print(f"--- Thread Summaries ({len(context.thread_summaries)}) ---")
+                        for ts in context.thread_summaries:
+                            thread_id = ts.get("thread_id", "?")
+                            summary = ts.get("summary_text", "")
+                            entries_created = ts.get("entries_created", [])
+                            entries_updated = ts.get("entries_updated", [])
+                            print(f"\nThread {thread_id}:")
+                            print(f"  Entries: +{len(entries_created)}, ~{len(entries_updated)}")
+                            print(f"  {summary}")
+
+                    # Check for chunk_summaries in context data
+                    chunk_summaries = getattr(context, "chunk_summaries", [])
+                    if chunk_summaries:
+                        print()
+                        print(f"--- Chunk Summaries ({len(chunk_summaries)}) ---")
+                        for cs in chunk_summaries:
+                            chunk_idx = cs.get("chunk_index", "?")
+                            first_scene = cs.get("first_scene_index", "?")
+                            last_scene = cs.get("last_scene_index", "?")
+                            summary = cs.get("summary_text", "")
+                            print(f"\nChunk {chunk_idx} (scenes {first_scene}-{last_scene}):")
+                            print(f"  {summary}")
+
             print()
             print(f"Captured {len(entries)} entry states")
     finally:
@@ -628,6 +681,7 @@ def run(args: argparse.Namespace) -> None:
         resume=not args.no_resume,
         max_tool_rounds=args.max_tool_rounds,
         context_budget=args.context_budget,
+        from_snapshot_id=getattr(args, "from_snapshot", None),
     )
     runner = AnnotationRunner(config)
     try:

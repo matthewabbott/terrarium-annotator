@@ -443,3 +443,106 @@ class TestToolLoop:
         assert stats.updated == 1
         assert stats.deleted == 1
         assert stats.tool_calls == 4
+
+
+class TestFromSnapshot:
+    """Tests for resuming from snapshot (F9)."""
+
+    def test_config_from_snapshot_id(self, tmp_path):
+        """RunnerConfig accepts from_snapshot_id."""
+        config = RunnerConfig(
+            corpus_db_path=tmp_path / "corpus.db",
+            annotator_db_path=tmp_path / "annotator.db",
+            from_snapshot_id=42,
+        )
+        assert config.from_snapshot_id == 42
+
+    def test_config_from_snapshot_id_default(self, tmp_path):
+        """from_snapshot_id defaults to None."""
+        config = RunnerConfig(
+            corpus_db_path=tmp_path / "corpus.db",
+            annotator_db_path=tmp_path / "annotator.db",
+        )
+        assert config.from_snapshot_id is None
+
+    def test_runner_from_snapshot_not_found(self, tmp_path):
+        """Runner raises error when snapshot not found."""
+        # Create actual test databases so initialization works
+        import tempfile
+        from terrarium_annotator.storage import GlossaryStore, SnapshotStore
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            annotator_db = Path(f.name)
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            corpus_db = Path(f.name)
+
+        # Initialize storage (creates tables)
+        GlossaryStore(annotator_db).close()
+        SnapshotStore(annotator_db).close()
+
+        config = RunnerConfig(
+            corpus_db_path=corpus_db,
+            annotator_db_path=annotator_db,
+            from_snapshot_id=9999,  # Non-existent
+        )
+
+        with pytest.raises(ValueError, match="Snapshot 9999 not found"):
+            AnnotationRunner(config)
+
+    def test_runner_from_snapshot_restores_context(self, tmp_path):
+        """Runner restores context and compaction state from snapshot."""
+        import tempfile
+        from terrarium_annotator.storage import GlossaryStore, SnapshotStore
+        from terrarium_annotator.context import AnnotationContext, CompactionState
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            annotator_db = Path(f.name)
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            corpus_db = Path(f.name)
+
+        # Create a snapshot to restore from
+        glossary = GlossaryStore(annotator_db)
+        snapshots = SnapshotStore(annotator_db)
+
+        context = AnnotationContext(system_prompt="Test prompt")
+        context.record_turn("user", "Test message")
+
+        compaction_state = CompactionState(
+            cumulative_summary="The story so far...",
+            completed_thread_ids=[1, 2, 3],
+        )
+
+        snapshot_id = snapshots.create(
+            snapshot_type="checkpoint",
+            last_post_id=500,
+            last_thread_id=5,
+            thread_position=3,
+            context=context,
+            compaction_state=compaction_state,
+            glossary=glossary,
+            token_count=10000,
+        )
+
+        glossary.close()
+        snapshots.close()
+
+        # Create runner with from_snapshot_id
+        config = RunnerConfig(
+            corpus_db_path=corpus_db,
+            annotator_db_path=annotator_db,
+            from_snapshot_id=snapshot_id,
+        )
+
+        runner = AnnotationRunner(config)
+
+        try:
+            # Verify context was restored
+            assert len(runner.context.conversation_history) > 0
+            # Verify compaction state was restored
+            assert runner.compaction_state.cumulative_summary == "The story so far..."
+            assert runner.compaction_state.completed_thread_ids == [1, 2, 3]
+            # Verify resume position was set
+            assert runner._resume_from_snapshot_post_id == 500
+            assert runner._thread_position == 3
+        finally:
+            runner.close()
