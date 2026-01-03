@@ -111,19 +111,26 @@ at thread boundaries. Chunk summaries track intra-thread compaction for long thr
 | <60% | No compaction needed |
 | 60-80% | Healthy range, no action |
 | ≥80% | Loop Tier 0.5/1 until <60% |
-| ≥90% | Emergency: Tiers 3-4 |
+| ≥85% | Emergency: Tiers 3-4 |
 
 ## Compaction Algorithm
 
 ```python
 # Rolling compaction - runs when tokens exceed 80% threshold
 while tokens > soft_threshold (60%) and has_compactable:
-    # Tier 0.5: Chunk compaction (intra-thread)
-    # Summarize oldest completed scene chunk, preserve recent 2 chunks
-    if has_unsummarized_chunks and can_summarize_chunk:
-        summarize_oldest_chunk()  # Groups of 10 scenes
-        remove_chunk_turns_from_history()
-        continue
+    # Tier 0.5: Adaptive chunk compaction (intra-thread)
+    # Try with decreasing preserve_recent values: 2 → 1 → 0
+    for preserve_n in [2, 1, 0]:
+        if can_summarize_chunk_with(preserve_n):
+            summarize_oldest_chunk()  # Groups of 7 scenes
+            remove_chunk_turns_from_history()
+            break  # Continue outer loop
+    else:
+        # Tier 0.5b: Partial chunk fallback
+        # If no full chunks but have 6+ scenes, summarize half
+        if current_scene_index >= 6 and no_chunks_summarized:
+            summarize_first_half_of_scenes()
+            continue
 
     # Tier 1: Thread compaction
     # Summarize oldest thread and merge directly into cumulative
@@ -132,7 +139,7 @@ while tokens > soft_threshold (60%) and has_compactable:
         merge_into_cumulative()  # Immediate merge, no separate list
         continue
 
-    # Below here: emergency-only (≥90% threshold)
+    # Below here: emergency-only (≥85% threshold)
     if not is_emergency:
         break
 
@@ -150,22 +157,24 @@ while tokens > soft_threshold (60%) and has_compactable:
 
 | Tier | Trigger | Action |
 |------|---------|--------|
-| 0.5 | ≥80%, >2 completed chunks | Summarize oldest chunk (10 scenes) → add to chunk_summaries |
+| 0.5 | ≥80%, chunks available | Summarize oldest chunk (7 scenes) with adaptive preserve (2→1→0) |
+| 0.5b | ≥80%, no full chunks, 6+ scenes | Partial chunk: summarize first half of scenes |
 | 1 | ≥80%, >1 completed threads | Summarize oldest thread → merge into cumulative_summary |
-| 3 | ≥90% emergency | Remove `<thinking>` blocks from old messages |
-| 4 | ≥90% emergency | Truncate old assistant responses to 500 chars |
+| 3 | ≥85% emergency | Remove `<thinking>` blocks from old messages |
+| 4 | ≥85% emergency | Truncate old assistant responses to 500 chars |
 
 ### Chunk Summary Format
 
 Chunk summaries track intra-thread compaction, enabling context management for
-very long threads (hundreds of scenes). Each chunk covers 10 consecutive scenes.
+very long threads (hundreds of scenes). Each chunk covers 7 consecutive scenes.
+Partial chunks (from Tier 0.5b fallback) use negative indices.
 
 ```xml
 <chunk_summaries>
-  <chunk thread="5" index="0" scenes="0-9" entries="12,15">
+  <chunk thread="5" index="0" scenes="0-6" entries="12,15">
     Party arrived at the guild. Introduced Soma and discussed quest options.
   </chunk>
-  <chunk thread="5" index="1" scenes="10-19" entries="18">
+  <chunk thread="5" index="1" scenes="7-13" entries="18">
     Accepted the ruins exploration quest. Updated Dawn's entry with new gear.
   </chunk>
 </chunk_summaries>

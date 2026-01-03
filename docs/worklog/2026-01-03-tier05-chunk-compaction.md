@@ -106,5 +106,56 @@ All 262 tests pass:
 - `docs/ARCHITECTURE.md` - Updated compaction docs
 
 ---
+
+## F5.2 Adaptive Compaction (Session 2)
+
+### Problem
+
+Compaction was getting stuck in a "doom loop" at 80-90% usage where:
+- Not enough completed chunks to trigger Tier 0.5 (needed 3 with preserve=2)
+- No completed threads to trigger Tier 1
+- Emergency (90%) not reached yet
+
+### Solution
+
+1. **Smaller chunks**: `scenes_per_chunk: 10 → 7`
+   - More frequent chunk boundaries = more compaction opportunities
+
+2. **Lower emergency threshold**: `emergency_ratio: 0.90 → 0.85`
+   - Earlier intervention before hitting hard limits
+
+3. **Adaptive preserve_recent reduction**: Try preserve values 2 → 1 → 0
+   - Even with just 1 completed chunk, can now compact at preserve=0
+
+4. **Tier 0.5b Partial chunk fallback**: If no full chunks but 6+ scenes:
+   - Summarize first half of scenes as a "partial chunk"
+   - Uses negative chunk indices to distinguish from regular chunks
+
+### Implementation
+
+```python
+# Tier 0.5: Adaptive chunk compaction
+for preserve_n in [2, 1, 0]:
+    if can_summarize_chunk(preserve_n):
+        summarize_oldest_chunk()
+        break
+else:
+    # Tier 0.5b: Partial chunk fallback
+    if current_scene_index >= 6 and no_chunks_summarized:
+        summarize_first_half_of_scenes()
+```
+
+### Files Changed
+
+- `src/terrarium_annotator/context/compactor.py` - Adaptive loop, partial chunk method
+- `docs/ARCHITECTURE.md` - Updated algorithm and tier table
+- `docs/ROADMAP.md` - Added F5.2 enhancement entry
+- `tests/test_compactor.py` - 6 new tests, 1 updated test
+
+### Test Results
+
+All 262 tests pass (35 compactor tests including 6 new adaptive tests)
+
+---
 *Agent: Claude Opus 4.5*
-*Duration: ~2 hours*
+*Duration: ~2.5 hours total (F5.1 + F5.2)*

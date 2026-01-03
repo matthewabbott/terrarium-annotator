@@ -93,7 +93,9 @@ class CompactionState:
         """Get number of completed chunks (full groups of N scenes)."""
         return self.current_scene_index // scenes_per_chunk
 
-    def get_unsummarized_chunks(self, scenes_per_chunk: int) -> list[tuple[int, int, int]]:
+    def get_unsummarized_chunks(
+        self, scenes_per_chunk: int
+    ) -> list[tuple[int, int, int]]:
         """Get list of (chunk_index, first_scene, last_scene) for unsummarized chunks."""
         completed_chunks = self.get_completed_chunk_count(scenes_per_chunk)
         unsummarized = []
@@ -121,7 +123,7 @@ class ContextCompactor:
     Thresholds:
     - Under 60%: No compaction needed
     - ≥80%: Tier 0.5 (chunks) or Tier 1 (threads) until <60%
-    - ≥90%: Emergency Tiers 3-4 (trim thinking, truncate)
+    - ≥85%: Emergency Tiers 3-4 (trim thinking, truncate)
 
     Tiers:
     0.5. Summarize oldest completed chunk → add to chunk_summaries (intra-thread)
@@ -141,9 +143,9 @@ class ContextCompactor:
         context_budget: int = 16000,
         soft_ratio: float = 0.60,
         thread_compact_ratio: float = 0.80,
-        emergency_ratio: float = 0.90,
+        emergency_ratio: float = 0.85,
         target_ratio: float = 0.70,
-        scenes_per_chunk: int = 10,
+        scenes_per_chunk: int = 7,
         preserve_recent_chunks: int = 2,
     ) -> None:
         """
@@ -156,9 +158,9 @@ class ContextCompactor:
             context_budget: Total context budget in tokens.
             soft_ratio: Under this, skip compaction entirely (default 60%).
             thread_compact_ratio: Enable rolling compaction (default 80%).
-            emergency_ratio: Emergency compaction with all tiers (default 90%).
+            emergency_ratio: Emergency compaction with all tiers (default 85%).
             target_ratio: Target ratio after compaction (default 70%).
-            scenes_per_chunk: Number of scenes per chunk for Tier 0.5 (default 10).
+            scenes_per_chunk: Number of scenes per chunk for Tier 0.5 (default 7).
             preserve_recent_chunks: Keep this many recent chunks intact (default 2).
         """
         self.counter = token_counter
@@ -271,72 +273,106 @@ class ContextCompactor:
                 break
             prev_tokens = current_tokens
 
-            # Tier 0.5: Chunk compaction (intra-thread)
-            # Summarize oldest completed chunk, preserve recent N chunks
-            unsummarized = state.get_unsummarized_chunks(self.scenes_per_chunk)
-            completed_chunks = state.get_completed_chunk_count(self.scenes_per_chunk)
-            # How many chunks we need to keep intact (recent ones)
-            chunks_to_keep = self.preserve_recent_chunks
-            # How many we can summarize = completed - keep
-            summarizable = completed_chunks - chunks_to_keep - len(state.summarized_chunk_indices)
-
-            if summarizable > 0 and unsummarized:
-                # Summarize oldest unsummarized chunk
-                chunk_idx, first_scene, last_scene = unsummarized[0]
-                LOGGER.info(
-                    "Tier 0.5: Summarizing chunk %d (scenes %d-%d) of thread %d",
-                    chunk_idx,
-                    first_scene,
-                    last_scene,
-                    state.current_thread_id,
+            # Tier 0.5: Adaptive chunk compaction (intra-thread)
+            # Try with decreasing preserve_recent values: 2 → 1 → 0
+            chunk_compacted = False
+            for preserve_n in range(self.preserve_recent_chunks, -1, -1):
+                unsummarized = state.get_unsummarized_chunks(self.scenes_per_chunk)
+                completed_chunks = state.get_completed_chunk_count(
+                    self.scenes_per_chunk
+                )
+                summarizable = (
+                    completed_chunks - preserve_n - len(state.summarized_chunk_indices)
                 )
 
-                # Get conversation turns for this chunk
-                chunk_messages = [
-                    m
-                    for m in messages
-                    if (
-                        m.get("thread_id") == state.current_thread_id
-                        and m.get("scene_index") is not None
-                        and first_scene <= m.get("scene_index") <= last_scene
-                    )
-                ]
-
-                # Summarize the chunk
-                chunk_summary = self.summarizer.summarize_chunk(
-                    thread_id=state.current_thread_id or 0,
-                    chunk_index=chunk_idx,
-                    first_scene_index=first_scene,
-                    last_scene_index=last_scene,
-                    conversation_excerpt=chunk_messages,
-                )
-                state.chunk_summaries.append(chunk_summary)
-                state.summarized_chunk_indices.append(chunk_idx)
-
-                # Remove chunk turns from messages AND persistent history
-                messages = self._remove_chunk_turns(
-                    messages, state.current_thread_id or 0, first_scene, last_scene
-                )
-                if context is not None:
-                    removed = context.remove_chunk_turns(
-                        state.current_thread_id or 0, first_scene, last_scene
-                    )
-                    LOGGER.debug(
-                        "Removed %d turns for chunk %d (scenes %d-%d)",
-                        removed,
+                if summarizable > 0 and unsummarized:
+                    # Summarize oldest unsummarized chunk
+                    chunk_idx, first_scene, last_scene = unsummarized[0]
+                    LOGGER.info(
+                        "Tier 0.5: Summarizing chunk %d (scenes %d-%d) of thread %d "
+                        "(preserve_recent=%d)",
                         chunk_idx,
                         first_scene,
                         last_scene,
+                        state.current_thread_id,
+                        preserve_n,
                     )
 
-                result.chunks_summarized += 1
-                result.highest_tier = max(result.highest_tier, 0.5)
-                current_tokens = self.counter.count_messages(messages)
+                    # Get conversation turns for this chunk
+                    chunk_messages = [
+                        m
+                        for m in messages
+                        if (
+                            m.get("thread_id") == state.current_thread_id
+                            and m.get("scene_index") is not None
+                            and first_scene <= m.get("scene_index") <= last_scene
+                        )
+                    ]
 
+                    # Summarize the chunk
+                    chunk_summary = self.summarizer.summarize_chunk(
+                        thread_id=state.current_thread_id or 0,
+                        chunk_index=chunk_idx,
+                        first_scene_index=first_scene,
+                        last_scene_index=last_scene,
+                        conversation_excerpt=chunk_messages,
+                    )
+                    state.chunk_summaries.append(chunk_summary)
+                    state.summarized_chunk_indices.append(chunk_idx)
+
+                    # Remove chunk turns from messages AND persistent history
+                    messages = self._remove_chunk_turns(
+                        messages, state.current_thread_id or 0, first_scene, last_scene
+                    )
+                    if context is not None:
+                        removed = context.remove_chunk_turns(
+                            state.current_thread_id or 0, first_scene, last_scene
+                        )
+                        LOGGER.debug(
+                            "Removed %d turns for chunk %d (scenes %d-%d)",
+                            removed,
+                            chunk_idx,
+                            first_scene,
+                            last_scene,
+                        )
+
+                    result.chunks_summarized += 1
+                    result.highest_tier = max(result.highest_tier, 0.5)
+                    current_tokens = self.counter.count_messages(messages)
+                    chunk_compacted = True
+                    break  # Exit preserve_n loop
+
+            if chunk_compacted:
                 if current_tokens < self.soft_threshold:
                     result.target_reached = True
                     break
                 continue
+
+            # Tier 0.5b: Partial chunk fallback
+            # If no full chunks available, summarize half of current scenes
+            if (
+                state.current_scene_index >= 6
+                and not state.summarized_chunk_indices
+                and state.current_thread_id is not None
+            ):
+                half = state.current_scene_index // 2
+                if half >= 3:
+                    LOGGER.info(
+                        "Tier 0.5b: Force partial chunk (scenes 0-%d) of thread %d",
+                        half - 1,
+                        state.current_thread_id,
+                    )
+                    messages, compacted = self._summarize_partial_chunk(
+                        messages, state, context, last_scene=half - 1
+                    )
+                    if compacted:
+                        result.chunks_summarized += 1
+                        result.highest_tier = max(result.highest_tier, 0.5)
+                        current_tokens = self.counter.count_messages(messages)
+                        if current_tokens < self.soft_threshold:
+                            result.target_reached = True
+                            break
+                        continue
 
             # Tier 1: Summarize oldest completed thread → merge into cumulative
             # Only if we have 2+ completed threads (preserve current thread's context)
@@ -590,3 +626,73 @@ class ContextCompactor:
             result.append(msg)
 
         return result, truncated_count
+
+    def _summarize_partial_chunk(
+        self,
+        messages: list[dict],
+        state: CompactionState,
+        context: AnnotationContext | None,
+        last_scene: int,
+    ) -> tuple[list[dict], bool]:
+        """
+        Summarize a partial chunk (fewer than scenes_per_chunk scenes).
+
+        Used as a fallback when no full chunks are available for compaction.
+
+        Args:
+            messages: Current message list.
+            state: Compaction state.
+            context: AnnotationContext for persistent history changes.
+            last_scene: Last scene index to include (0-indexed, inclusive).
+
+        Returns:
+            Tuple of (modified messages, whether compaction happened).
+        """
+        thread_id = state.current_thread_id
+        if thread_id is None:
+            return messages, False
+
+        first_scene = 0
+        # Use chunk_index = -1 to indicate partial chunk
+        chunk_idx = -1 - len(state.summarized_chunk_indices)
+
+        # Get conversation turns for partial chunk
+        chunk_messages = [
+            m
+            for m in messages
+            if (
+                m.get("thread_id") == thread_id
+                and m.get("scene_index") is not None
+                and first_scene <= m.get("scene_index") <= last_scene
+            )
+        ]
+
+        if not chunk_messages:
+            return messages, False
+
+        # Summarize the partial chunk
+        chunk_summary = self.summarizer.summarize_chunk(
+            thread_id=thread_id,
+            chunk_index=chunk_idx,
+            first_scene_index=first_scene,
+            last_scene_index=last_scene,
+            conversation_excerpt=chunk_messages,
+        )
+        state.chunk_summaries.append(chunk_summary)
+        # Track with negative index to distinguish from regular chunks
+        state.summarized_chunk_indices.append(chunk_idx)
+
+        # Remove partial chunk turns from messages AND persistent history
+        messages = self._remove_chunk_turns(
+            messages, thread_id, first_scene, last_scene
+        )
+        if context is not None:
+            removed = context.remove_chunk_turns(thread_id, first_scene, last_scene)
+            LOGGER.debug(
+                "Removed %d turns for partial chunk (scenes %d-%d)",
+                removed,
+                first_scene,
+                last_scene,
+            )
+
+        return messages, True

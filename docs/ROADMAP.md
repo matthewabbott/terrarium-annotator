@@ -381,6 +381,11 @@ Enhancements:
   - Intra-thread scene chunking for long threads
   - Fixed doom loop bug in Tier 4
   - Simplified context structure (immediate thread merge)
+- F5.2 (Adaptive Compaction) - 2026-01-03
+  - Smaller chunks: 10 → 7 scenes per chunk
+  - Lower emergency threshold: 90% → 85%
+  - Adaptive preserve_recent: tries 2 → 1 → 0 progressively
+  - Tier 0.5b: partial chunk fallback (half of scenes) when no full chunks
 - F8.6 (Verbose Snapshot Inspection) - 2026-01-03
   - `inspect snapshot <id> --verbose` shows full cumulative/thread/chunk summaries
   - JSON format includes full content when verbose

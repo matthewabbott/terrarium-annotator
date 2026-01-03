@@ -76,11 +76,11 @@ class TestContextCompactor:
         mock_counter.count_messages.return_value = 8001
         assert compactor.should_compact([]) is True
 
-        # Emergency compact (tiers 2-4) triggers at 90%
-        mock_counter.count_messages.return_value = 9000
+        # Emergency compact (tiers 3-4) triggers at 85%
+        mock_counter.count_messages.return_value = 8500
         assert compactor.should_emergency_compact([]) is False
 
-        mock_counter.count_messages.return_value = 9001
+        mock_counter.count_messages.return_value = 8501
         assert compactor.should_emergency_compact([]) is True
 
     def test_tier1_summarizes_oldest_thread(self, mock_counter, mock_summarizer):
@@ -586,8 +586,9 @@ class TestTier05ChunkCompaction:
         mock_summarizer.summarize_chunk.assert_called_once()
 
     def test_tier05_preserves_recent_chunks(self, mock_counter, mock_summarizer):
-        """Tier 0.5: Should preserve recent chunks."""
-        mock_counter.count_messages.return_value = 9000
+        """Tier 0.5: With adaptive reduction, even 1 complete chunk can be summarized."""
+        # Start above trigger, end below target after compaction
+        mock_counter.count_messages.side_effect = [9000, 6000]
 
         compactor = ContextCompactor(
             mock_counter,
@@ -597,15 +598,18 @@ class TestTier05ChunkCompaction:
             preserve_recent_chunks=2,
         )
 
-        # Only 2 complete chunks - same as preserve_recent_chunks, so no summarization
+        # 1 complete chunk - with adaptive (2→1→0), CAN summarize at preserve=0
         state = CompactionState()
         state.current_thread_id = 1
-        state.current_scene_index = 25  # 2 complete chunks
+        state.current_scene_index = 15  # 1 complete chunk (0-9)
 
         result_messages, result = compactor.compact([], state)
 
-        assert result.chunks_summarized == 0
-        mock_summarizer.summarize_chunk.assert_not_called()
+        # With 1 completed chunk and adaptive preserve (tries 2,1,0):
+        # At preserve=0: summarizable = 1 - 0 - 0 = 1, so it WILL compact
+        # This is the new behavior - even 1 chunk can be summarized now
+        assert result.chunks_summarized == 1
+        mock_summarizer.summarize_chunk.assert_called_once()
 
     def test_tier05_removes_chunk_turns(self, mock_counter, mock_summarizer):
         """Tier 0.5: Should remove chunk turns after summarization."""
@@ -636,3 +640,172 @@ class TestTier05ChunkCompaction:
         # Messages from chunk 0 should be removed
         assert len(result_messages) == 2
         assert all(m.get("scene_index", 0) >= 10 for m in result_messages)
+
+
+class TestAdaptiveCompaction:
+    """Tests for adaptive compaction with progressive preserve_recent reduction."""
+
+    @pytest.fixture
+    def mock_counter(self):
+        counter = Mock()
+        counter.count_messages.return_value = 10000
+        return counter
+
+    @pytest.fixture
+    def mock_summarizer(self):
+        summarizer = Mock()
+        summarizer.summarize_chunk.return_value = ChunkSummary(
+            thread_id=1,
+            chunk_index=0,
+            first_scene_index=0,
+            last_scene_index=6,
+            summary_text="Chunk summary",
+        )
+        return summarizer
+
+    def test_adaptive_reduces_preserve_recent(self, mock_counter, mock_summarizer):
+        """Should reduce preserve_recent from 2→1→0 until compaction works."""
+        # Above trigger, should compact
+        mock_counter.count_messages.side_effect = [9000, 6000]
+
+        compactor = ContextCompactor(
+            mock_counter,
+            mock_summarizer,
+            context_budget=10000,
+            scenes_per_chunk=7,
+            preserve_recent_chunks=2,
+        )
+
+        # 2 complete chunks (0-6, 7-13), normally need 3 chunks to summarize
+        # with preserve_recent=2, but adaptive should reduce to 1
+        state = CompactionState()
+        state.current_thread_id = 1
+        state.current_scene_index = 14  # 2 complete chunks
+
+        messages = [
+            {"role": "user", "content": "Scene 0", "thread_id": 1, "scene_index": 0},
+            {"role": "assistant", "content": "Response 0", "thread_id": 1, "scene_index": 0},
+        ]
+
+        result_messages, result = compactor.compact(messages, state)
+
+        # Should have compacted despite only 2 chunks (used preserve=0 or 1)
+        assert result.chunks_summarized == 1
+        assert result.highest_tier == 0.5
+        mock_summarizer.summarize_chunk.assert_called_once()
+
+    def test_partial_chunk_fallback(self, mock_counter, mock_summarizer):
+        """Should summarize partial chunk when no full chunks available."""
+        mock_counter.count_messages.side_effect = [9000, 6000]
+
+        compactor = ContextCompactor(
+            mock_counter,
+            mock_summarizer,
+            context_budget=10000,
+            scenes_per_chunk=7,
+            preserve_recent_chunks=2,
+        )
+
+        # 6 scenes = 0 complete chunks, but enough for partial chunk fallback
+        state = CompactionState()
+        state.current_thread_id = 1
+        state.current_scene_index = 6
+
+        messages = [
+            {"role": "user", "content": "Scene 0", "thread_id": 1, "scene_index": 0},
+            {"role": "assistant", "content": "Response 0", "thread_id": 1, "scene_index": 0},
+            {"role": "user", "content": "Scene 2", "thread_id": 1, "scene_index": 2},
+            {"role": "assistant", "content": "Response 2", "thread_id": 1, "scene_index": 2},
+        ]
+
+        result_messages, result = compactor.compact(messages, state)
+
+        # Should have used partial chunk fallback (half of 6 = 3 scenes)
+        assert result.chunks_summarized == 1
+        assert result.highest_tier == 0.5
+        # Partial chunk uses negative indices
+        assert any(idx < 0 for idx in state.summarized_chunk_indices)
+
+    def test_emergency_threshold_at_85_percent(self, mock_counter, mock_summarizer):
+        """Emergency compaction should trigger at 85% (not 90%)."""
+        compactor = ContextCompactor(
+            mock_counter,
+            mock_summarizer,
+            context_budget=10000,  # 85% = 8500
+        )
+
+        # At 84% - not emergency
+        mock_counter.count_messages.return_value = 8400
+        assert compactor.should_emergency_compact([]) is False
+
+        # At 85% - not emergency (threshold is >85%)
+        mock_counter.count_messages.return_value = 8500
+        assert compactor.should_emergency_compact([]) is False
+
+        # At 86% - emergency
+        mock_counter.count_messages.return_value = 8600
+        assert compactor.should_emergency_compact([]) is True
+
+    def test_scenes_per_chunk_defaults_to_7(self, mock_counter, mock_summarizer):
+        """Default scenes_per_chunk should be 7."""
+        compactor = ContextCompactor(
+            mock_counter,
+            mock_summarizer,
+            context_budget=10000,
+        )
+
+        assert compactor.scenes_per_chunk == 7
+
+    def test_partial_chunk_requires_6_scenes(self, mock_counter, mock_summarizer):
+        """Partial chunk fallback requires at least 6 scenes."""
+        mock_counter.count_messages.return_value = 9000
+
+        compactor = ContextCompactor(
+            mock_counter,
+            mock_summarizer,
+            context_budget=10000,
+            scenes_per_chunk=7,
+        )
+
+        # Only 5 scenes - not enough for partial chunk
+        state = CompactionState()
+        state.current_thread_id = 1
+        state.current_scene_index = 5
+
+        result_messages, result = compactor.compact([], state)
+
+        # Should NOT have used partial chunk (not enough scenes)
+        assert result.chunks_summarized == 0
+        mock_summarizer.summarize_chunk.assert_not_called()
+
+    def test_partial_chunk_summarizes_half(self, mock_counter, mock_summarizer):
+        """Partial chunk should summarize first half of scenes."""
+        mock_counter.count_messages.side_effect = [9000, 6000]
+
+        compactor = ContextCompactor(
+            mock_counter,
+            mock_summarizer,
+            context_budget=10000,
+            scenes_per_chunk=10,  # Use 10 so 6 scenes = 0 complete chunks
+        )
+
+        # 6 scenes = 0 complete chunks with scenes_per_chunk=10
+        # Partial should summarize scenes 0-2 (half=3, last_scene=2)
+        state = CompactionState()
+        state.current_thread_id = 1
+        state.current_scene_index = 6
+
+        messages = [
+            {"role": "user", "content": "Scene 0", "thread_id": 1, "scene_index": 0},
+            {"role": "user", "content": "Scene 2", "thread_id": 1, "scene_index": 2},
+            {"role": "user", "content": "Scene 5", "thread_id": 1, "scene_index": 5},
+        ]
+
+        result_messages, result = compactor.compact(messages, state)
+
+        # Should have summarized first half (scenes 0-2)
+        assert result.chunks_summarized == 1
+        # Check that summarize_chunk was called with last_scene=2 (half-1 = 3-1 = 2)
+        call_args = mock_summarizer.summarize_chunk.call_args
+        assert call_args.kwargs["first_scene_index"] == 0
+        assert call_args.kwargs["last_scene_index"] == 2
