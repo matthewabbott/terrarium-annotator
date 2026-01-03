@@ -7,8 +7,9 @@ from terrarium_annotator.context.compactor import (
     ContextCompactor,
 )
 from terrarium_annotator.context.metrics import CompactionStats, ContextMetrics
-from terrarium_annotator.context.models import ThreadSummary
+from terrarium_annotator.context.models import ChunkSummary, ThreadSummary
 from terrarium_annotator.context.prompts import (
+    CHUNK_SUMMARY_PROMPT,
     CUMULATIVE_SUMMARY_PROMPT,
     SYSTEM_PROMPT,
     THREAD_SUMMARY_PROMPT,
@@ -22,6 +23,8 @@ NewAnnotationContext = AnnotationContext
 
 __all__ = [
     "AnnotationContext",
+    "ChunkSummary",
+    "CHUNK_SUMMARY_PROMPT",
     "CompactionResult",
     "CompactionState",
     "CompactionStats",

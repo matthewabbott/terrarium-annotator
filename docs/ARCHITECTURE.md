@@ -21,12 +21,12 @@ CLI -> Runner -> [Context, Compactor, Curator] -> ToolDispatcher -> Storage
 
 ### Context Layer (`context/` package)
 - `annotation.py`: AnnotationContext - message building, history tracking
-- `summarizer.py`: ThreadSummarizer - thread summary generation
+- `summarizer.py`: ThreadSummarizer - thread/chunk summary generation
 - `compactor.py`: ContextCompactor - rolling compaction with 60/80/90% thresholds
 - `token_counter.py`: TokenCounter - vLLM + heuristic counting
-- `models.py`: ThreadSummary, SummaryResult dataclasses
+- `models.py`: ThreadSummary, ChunkSummary, SummaryResult dataclasses
 - `metrics.py`: CompactionStats for observability
-- `prompts.py`: Summarization prompt templates
+- `prompts.py`: Summarization prompt templates (thread, chunk, cumulative)
 
 ### Tool Layer
 - `tools/dispatcher.py`: Route calls, validate I/O
@@ -88,15 +88,21 @@ INIT -> IDLE -> [NO_MORE -> EXIT]
 ┌─────────────────────────────────────────────────────────────────┐
 │ System prompt + tool definitions           (3000-5000 tokens)   │
 ├─────────────────────────────────────────────────────────────────┤
-│ Cumulative summary: "The Story So Far"     (200-500 tokens)     │
+│ Cumulative summary: "The Story So Far"     (variable)           │
+│   (all completed threads merged together)                       │
 ├─────────────────────────────────────────────────────────────────┤
-│ Thread summaries (3 max, with entry IDs)   (150-450 tokens)     │
+│ Chunk summaries: [Chunk 0, 1, ...]         (variable)           │
+│   (summarized scene chunks from current thread)                 │
 ├─────────────────────────────────────────────────────────────────┤
-│ Full conversation history (recent threads)  (variable)          │
+│ Full conversation history                   (variable)          │
+│   (recent chunks only - last 2-3 worth of scenes)              │
 ├─────────────────────────────────────────────────────────────────┤
 │ Current scene + relevant glossary entries  (3000-13000 tokens)  │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+**Key insight**: Thread summaries are immediately merged into cumulative_summary
+at thread boundaries. Chunk summaries track intra-thread compaction for long threads.
 
 ## Compaction Thresholds
 
@@ -104,23 +110,26 @@ INIT -> IDLE -> [NO_MORE -> EXIT]
 |-------|--------|
 | <60% | No compaction needed |
 | 60-80% | Healthy range, no action |
-| ≥80% | Loop Tier 1 (summarize threads) until <60% |
-| >3 summaries | Tier 2: Merge oldest into cumulative |
-| ≥90% | Emergency: All tiers (3-4) |
+| ≥80% | Loop Tier 0.5/1 until <60% |
+| ≥90% | Emergency: Tiers 3-4 |
 
 ## Compaction Algorithm
 
 ```python
-# Rolling compaction - runs at thread boundaries or when triggered
+# Rolling compaction - runs when tokens exceed 80% threshold
 while tokens > soft_threshold (60%) and has_compactable:
-    # Tier 1: Summarize oldest completed thread
-    if completed_threads > 1:
-        summarize_oldest_thread()  # Keep looping until <60%
+    # Tier 0.5: Chunk compaction (intra-thread)
+    # Summarize oldest completed scene chunk, preserve recent 2 chunks
+    if has_unsummarized_chunks and can_summarize_chunk:
+        summarize_oldest_chunk()  # Groups of 10 scenes
+        remove_chunk_turns_from_history()
         continue
 
-    # Tier 2: Merge old summaries (runs when >3 summaries)
-    if summaries > 3:
-        merge_oldest_two_into_cumulative()  # Keeps 3 recent
+    # Tier 1: Thread compaction
+    # Summarize oldest thread and merge directly into cumulative
+    if completed_threads > 1:
+        summarize_oldest_thread()
+        merge_into_cumulative()  # Immediate merge, no separate list
         continue
 
     # Below here: emergency-only (≥90% threshold)
@@ -141,30 +150,39 @@ while tokens > soft_threshold (60%) and has_compactable:
 
 | Tier | Trigger | Action |
 |------|---------|--------|
-| 1 | ≥80%, >1 completed threads | Summarize oldest thread → add to thread_summaries |
-| 2 | >3 thread summaries | Merge 2 oldest into cumulative (keeps 3 recent with entry IDs) |
+| 0.5 | ≥80%, >2 completed chunks | Summarize oldest chunk (10 scenes) → add to chunk_summaries |
+| 1 | ≥80%, >1 completed threads | Summarize oldest thread → merge into cumulative_summary |
 | 3 | ≥90% emergency | Remove `<thinking>` blocks from old messages |
 | 4 | ≥90% emergency | Truncate old assistant responses to 500 chars |
 
-### Thread Summary Format
+### Chunk Summary Format
 
-Thread summaries include entry IDs to help the agent track which glossary entries
-it created or updated in each thread. This enables proper updates when details
-are discovered later (e.g., renaming "weird sphere" to "archeota").
+Chunk summaries track intra-thread compaction, enabling context management for
+very long threads (hundreds of scenes). Each chunk covers 10 consecutive scenes.
 
 ```xml
-<thread_summaries>
-  <thread id="5" position="0" entries="12,15,18">
-    Soma introduced the party to the questmaster guild. Created entries for
-    Soma (questmaster NPC) and Dawn (warrior PC).
-  </thread>
-  <thread id="6" position="1" entries="20,21">
-    Party explored the ancient ruins. Updated Dawn's entry with combat style.
-  </thread>
-</thread_summaries>
+<chunk_summaries>
+  <chunk thread="5" index="0" scenes="0-9" entries="12,15">
+    Party arrived at the guild. Introduced Soma and discussed quest options.
+  </chunk>
+  <chunk thread="5" index="1" scenes="10-19" entries="18">
+    Accepted the ruins exploration quest. Updated Dawn's entry with new gear.
+  </chunk>
+</chunk_summaries>
 ```
 
-The `entries` attribute contains comma-separated entry IDs (both created and updated).
+### Cumulative Summary
+
+At thread boundaries, thread summaries are immediately merged into the cumulative
+summary (no separate thread_summaries list). This keeps context simpler:
+
+```xml
+<cumulative_summary>
+The Story So Far: Party formed in Thread 1, joined questmaster guild in Thread 5.
+Key characters: Soma (questmaster), Dawn (warrior PC), Marcus (mage PC).
+Currently exploring ancient ruins seeking the Orb of Shadows.
+</cumulative_summary>
+```
 
 ## Snapshot Rehydration
 

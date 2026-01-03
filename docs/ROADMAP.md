@@ -144,13 +144,23 @@ The existing `codex.py` uses JSON. We will:
 ### Scope
 
 1. ThreadSummarizer (hybrid summaries with entry ID tracking)
-2. ContextCompactor (60%/80%/90% thresholds, 4-tier compaction)
+2. ContextCompactor (60%/80%/90% thresholds, tiered compaction)
 3. Cumulative summary merging
+4. Tier 0.5: Intra-thread scene chunking (10 scenes per chunk)
 
 ### Dependencies
 
 - F2 (TokenCounter)
 - F4 (Runner integration)
+
+### Compaction Tiers
+
+| Tier | Trigger | Action |
+|------|---------|--------|
+| 0.5 | ≥80%, >2 completed chunks | Summarize oldest chunk → add to chunk_summaries |
+| 1 | ≥80%, >1 completed threads | Summarize thread → merge into cumulative |
+| 3 | ≥90% emergency | Trim thinking blocks |
+| 4 | ≥90% emergency | Truncate old responses |
 
 ---
 
@@ -365,6 +375,12 @@ Completed:
 - F7.5 (Integration Tests) - 2026-01-02
 - F8 (Exporters) - 2026-01-02
 - F8.5 (Inspect Commands) - 2026-01-02
+
+Enhancements:
+- F5.1 (Tier 0.5 Chunk Compaction) - 2026-01-03
+  - Intra-thread scene chunking for long threads
+  - Fixed doom loop bug in Tier 4
+  - Simplified context structure (immediate thread merge)
 
 See `docs/worklog/` for session notes.
 

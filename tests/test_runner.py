@@ -279,7 +279,7 @@ class TestToolLoop:
         )
 
         mock_scene = Mock(thread_id=1, last_post_id=10)
-        stats = runner._run_tool_loop([], mock_scene)
+        stats = runner._run_tool_loop([], mock_scene, scene_index=0)
 
         assert stats.rounds == 1
         assert stats.tool_calls == 0
@@ -311,7 +311,7 @@ class TestToolLoop:
         )
 
         mock_scene = Mock(thread_id=1, last_post_id=10)
-        stats = runner._run_tool_loop([], mock_scene)
+        stats = runner._run_tool_loop([], mock_scene, scene_index=0)
 
         assert stats.rounds == 2
         assert stats.tool_calls == 1
@@ -343,7 +343,7 @@ class TestToolLoop:
         ]
 
         mock_scene = Mock(thread_id=1, last_post_id=10)
-        stats = runner._run_tool_loop([], mock_scene)
+        stats = runner._run_tool_loop([], mock_scene, scene_index=0)
 
         assert stats.tool_calls == 3
         assert stats.created == 1
@@ -372,7 +372,7 @@ class TestToolLoop:
         )
 
         mock_scene = Mock(thread_id=1, last_post_id=10, first_post_id=1)
-        stats = runner._run_tool_loop([], mock_scene)
+        stats = runner._run_tool_loop([], mock_scene, scene_index=0)
 
         # Should have hit max_tool_rounds (5)
         assert stats.rounds == 5
@@ -402,7 +402,7 @@ class TestToolLoop:
         )
 
         mock_scene = Mock(thread_id=1, last_post_id=10)
-        stats = runner._run_tool_loop([], mock_scene)
+        stats = runner._run_tool_loop([], mock_scene, scene_index=0)
 
         # Should complete despite error
         assert stats.rounds == 2
@@ -437,7 +437,7 @@ class TestToolLoop:
         ]
 
         mock_scene = Mock(thread_id=1, last_post_id=10)
-        stats = runner._run_tool_loop([], mock_scene)
+        stats = runner._run_tool_loop([], mock_scene, scene_index=0)
 
         assert stats.created == 2
         assert stats.updated == 1

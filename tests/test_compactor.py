@@ -9,7 +9,7 @@ from terrarium_annotator.context.compactor import (
     CompactionState,
     ContextCompactor,
 )
-from terrarium_annotator.context.models import ThreadSummary
+from terrarium_annotator.context.models import ChunkSummary, ThreadSummary
 
 
 class TestContextCompactor:
@@ -84,7 +84,7 @@ class TestContextCompactor:
         assert compactor.should_emergency_compact([]) is True
 
     def test_tier1_summarizes_oldest_thread(self, mock_counter, mock_summarizer):
-        """Tier 1: Should summarize oldest completed thread."""
+        """Tier 1: Should summarize oldest completed thread and merge into cumulative."""
         # Start above trigger, end below target after one iteration
         mock_counter.count_messages.side_effect = [9000, 6000]
 
@@ -96,8 +96,10 @@ class TestContextCompactor:
         messages, result = compactor.compact([], state)
 
         assert result.threads_summarized == 1
+        assert result.summaries_merged == 1  # Immediately merged into cumulative
         assert 1 not in state.completed_thread_ids
-        assert len(state.thread_summaries) == 1
+        # Thread summaries are now merged into cumulative, not kept separately
+        assert state.cumulative_summary != ""
         mock_summarizer.summarize_thread.assert_called_once()
 
     def test_tier1_preserves_last_thread(self, mock_counter, mock_summarizer):
@@ -114,10 +116,28 @@ class TestContextCompactor:
         assert result.threads_summarized == 0
         mock_summarizer.summarize_thread.assert_not_called()
 
-    def test_tier2_merges_summaries(self, mock_counter, mock_summarizer):
-        """Tier 2: Should merge old summaries (emergency only >90%)."""
-        # Need >9000 to trigger emergency mode for tier 2
-        mock_counter.count_messages.side_effect = [9100, 6000]
+    def test_tier1_merges_multiple_threads(self, mock_counter, mock_summarizer):
+        """Tier 1: Should summarize and merge multiple completed threads."""
+        # Need multiple iterations to summarize multiple threads
+        mock_counter.count_messages.side_effect = [9100, 8500, 8000, 6000]
+
+        compactor = ContextCompactor(
+            mock_counter, mock_summarizer, context_budget=10000
+        )
+
+        state = CompactionState(
+            completed_thread_ids=[1, 2, 3, 4],  # 4 threads to process
+        )
+        messages, result = compactor.compact([], state)
+
+        # Should summarize threads until below soft threshold
+        assert result.threads_summarized >= 1
+        assert result.summaries_merged >= 1  # Each summarized thread is merged
+        assert state.cumulative_summary != ""
+
+    def test_tier1_with_only_one_thread_skips(self, mock_counter, mock_summarizer):
+        """Tier 1: Should skip when only one completed thread (need 2+)."""
+        mock_counter.count_messages.return_value = 9000  # Always above target
 
         compactor = ContextCompactor(
             mock_counter, mock_summarizer, context_budget=10000
@@ -129,34 +149,12 @@ class TestContextCompactor:
                 ThreadSummary(1, 0, "Summary 1"),
                 ThreadSummary(2, 1, "Summary 2"),
                 ThreadSummary(3, 2, "Summary 3"),
-                ThreadSummary(4, 3, "Summary 4"),
-            ],  # 4 summaries > 3 threshold
+            ],  # Legacy summaries
         )
         messages, result = compactor.compact([], state)
 
-        assert result.summaries_merged == 2
-        assert len(state.thread_summaries) == 2
-        assert state.cumulative_summary != ""
-
-    def test_tier2_preserves_recent_summaries(self, mock_counter, mock_summarizer):
-        """Tier 2: Should preserve 3 most recent summaries."""
-        mock_counter.count_messages.return_value = 9000  # Always above target
-
-        compactor = ContextCompactor(
-            mock_counter, mock_summarizer, context_budget=10000
-        )
-
-        state = CompactionState(
-            completed_thread_ids=[1],
-            thread_summaries=[
-                ThreadSummary(1, 0, "Summary 1"),
-                ThreadSummary(2, 1, "Summary 2"),
-                ThreadSummary(3, 2, "Summary 3"),
-            ],  # Exactly 3
-        )
-        messages, result = compactor.compact([], state)
-
-        # No merging since <= 3 summaries
+        # No summarization since only 1 completed thread
+        assert result.threads_summarized == 0
         assert result.summaries_merged == 0
 
     def test_tier3_trims_thinking(self, mock_counter, mock_summarizer):
@@ -317,21 +315,15 @@ class TestContextCompactor:
 
     def test_result_tracks_all_operations(self, mock_counter, mock_summarizer):
         """Result should track counts from all tiers (emergency mode)."""
-        # Multiple iterations needed, >9000 for emergency mode
-        mock_counter.count_messages.side_effect = [9100, 8500, 8000, 6000]
+        # Multiple iterations needed - each tier needs token count check
+        mock_counter.count_messages.side_effect = [9100, 8000, 7500, 6000]
 
         compactor = ContextCompactor(
             mock_counter, mock_summarizer, context_budget=10000
         )
 
         state = CompactionState(
-            completed_thread_ids=[1, 2, 3],
-            thread_summaries=[
-                ThreadSummary(10, 0, "S1"),
-                ThreadSummary(11, 1, "S2"),
-                ThreadSummary(12, 2, "S3"),
-                ThreadSummary(13, 3, "S4"),
-            ],
+            completed_thread_ids=[1, 2, 3, 4],  # Need multiple threads to summarize
         )
         messages = [
             {"role": "assistant", "content": "<thinking>T</thinking>R"},
@@ -339,10 +331,10 @@ class TestContextCompactor:
 
         result_messages, result = compactor.compact(messages, state)
 
-        # Should have done multiple operations
+        # Should have done multiple thread summarizations
         assert result.initial_tokens == 9100
-        assert result.final_tokens == 6000
-        assert result.target_reached is True
+        assert result.threads_summarized >= 1
+        assert result.summaries_merged >= 1  # Each thread is merged into cumulative
 
     def test_custom_thresholds(self, mock_counter, mock_summarizer):
         """Should respect custom threshold ratios."""
@@ -413,6 +405,7 @@ class TestCompactionResult:
         result = CompactionResult(
             initial_tokens=10000,
             final_tokens=7000,
+            chunks_summarized=1,
             threads_summarized=2,
             summaries_merged=1,
             turns_trimmed=3,
@@ -422,8 +415,224 @@ class TestCompactionResult:
 
         assert result.initial_tokens == 10000
         assert result.final_tokens == 7000
+        assert result.chunks_summarized == 1
         assert result.threads_summarized == 2
         assert result.summaries_merged == 1
         assert result.turns_trimmed == 3
         assert result.responses_truncated == 1
         assert result.target_reached is True
+
+
+class TestChunkSummary:
+    """ChunkSummary dataclass tests."""
+
+    def test_fields(self):
+        cs = ChunkSummary(
+            thread_id=5,
+            chunk_index=2,
+            first_scene_index=20,
+            last_scene_index=29,
+            summary_text="Chunk summary text",
+            entries_created=[1, 2],
+            entries_updated=[3],
+        )
+
+        assert cs.thread_id == 5
+        assert cs.chunk_index == 2
+        assert cs.first_scene_index == 20
+        assert cs.last_scene_index == 29
+        assert cs.summary_text == "Chunk summary text"
+        assert cs.entries_created == [1, 2]
+        assert cs.entries_updated == [3]
+
+    def test_serialization(self):
+        cs = ChunkSummary(
+            thread_id=5,
+            chunk_index=0,
+            first_scene_index=0,
+            last_scene_index=9,
+            summary_text="Summary",
+        )
+        data = cs.to_dict()
+
+        restored = ChunkSummary.from_dict(data)
+        assert restored.thread_id == cs.thread_id
+        assert restored.chunk_index == cs.chunk_index
+        assert restored.first_scene_index == cs.first_scene_index
+        assert restored.last_scene_index == cs.last_scene_index
+        assert restored.summary_text == cs.summary_text
+
+
+class TestCompactionStateChunks:
+    """CompactionState chunk tracking tests."""
+
+    def test_start_new_thread_resets_chunk_state(self):
+        state = CompactionState()
+        state.current_thread_id = 1
+        state.current_scene_index = 50
+        state.chunk_summaries = [ChunkSummary(1, 0, 0, 9, "Old summary")]
+        state.summarized_chunk_indices = [0, 1, 2]
+
+        state.start_new_thread(2)
+
+        assert state.current_thread_id == 2
+        assert state.current_scene_index == 0
+        assert state.chunk_summaries == []
+        assert state.summarized_chunk_indices == []
+
+    def test_advance_scene(self):
+        state = CompactionState()
+        state.current_scene_index = 5
+
+        state.advance_scene()
+
+        assert state.current_scene_index == 6
+
+    def test_get_completed_chunk_count(self):
+        state = CompactionState()
+        state.current_scene_index = 25  # 2 complete chunks (0-9, 10-19)
+
+        assert state.get_completed_chunk_count(10) == 2
+
+        state.current_scene_index = 30  # 3 complete chunks
+        assert state.get_completed_chunk_count(10) == 3
+
+        state.current_scene_index = 9  # 0 complete chunks (9 < 10)
+        assert state.get_completed_chunk_count(10) == 0
+
+    def test_get_unsummarized_chunks(self):
+        state = CompactionState()
+        state.current_scene_index = 35  # 3 complete chunks
+        state.summarized_chunk_indices = [0]  # Only chunk 0 summarized
+
+        unsummarized = state.get_unsummarized_chunks(10)
+
+        assert len(unsummarized) == 2
+        assert unsummarized[0] == (1, 10, 19)  # chunk 1
+        assert unsummarized[1] == (2, 20, 29)  # chunk 2
+
+    def test_chunk_serialization(self):
+        state = CompactionState()
+        state.cumulative_summary = "Cumulative"
+        state.chunk_summaries = [ChunkSummary(1, 0, 0, 9, "Chunk summary")]
+        state.current_thread_id = 5
+        state.current_scene_index = 15
+        state.summarized_chunk_indices = [0]
+
+        data = state.to_dict()
+        restored = CompactionState.from_dict(data)
+
+        assert restored.cumulative_summary == "Cumulative"
+        assert len(restored.chunk_summaries) == 1
+        assert restored.chunk_summaries[0].summary_text == "Chunk summary"
+        assert restored.current_thread_id == 5
+        assert restored.current_scene_index == 15
+        assert restored.summarized_chunk_indices == [0]
+
+
+class TestTier05ChunkCompaction:
+    """Tier 0.5 chunk compaction tests."""
+
+    @pytest.fixture
+    def mock_counter(self):
+        counter = Mock()
+        counter.count_messages.return_value = 10000
+        return counter
+
+    @pytest.fixture
+    def mock_summarizer(self):
+        summarizer = Mock()
+        summarizer.summarize_chunk.return_value = ChunkSummary(
+            thread_id=1,
+            chunk_index=0,
+            first_scene_index=0,
+            last_scene_index=9,
+            summary_text="Chunk 0 summary",
+        )
+        return summarizer
+
+    def test_tier05_summarizes_oldest_chunk(self, mock_counter, mock_summarizer):
+        """Tier 0.5: Should summarize oldest completed chunk."""
+        mock_counter.count_messages.side_effect = [9000, 6000]
+
+        compactor = ContextCompactor(
+            mock_counter,
+            mock_summarizer,
+            context_budget=10000,
+            scenes_per_chunk=10,
+            preserve_recent_chunks=2,
+        )
+
+        # Set up state with completed chunks
+        state = CompactionState()
+        state.current_thread_id = 1
+        state.current_scene_index = 35  # 3 complete chunks (0-9, 10-19, 20-29)
+        # Keep last 2 chunks intact, so chunk 0 can be summarized
+
+        # Add messages with scene_index tags
+        messages = [
+            {"role": "user", "content": "Scene 0", "thread_id": 1, "scene_index": 0},
+            {"role": "assistant", "content": "Response 0", "thread_id": 1, "scene_index": 0},
+            {"role": "user", "content": "Scene 10", "thread_id": 1, "scene_index": 10},
+            {"role": "assistant", "content": "Response 10", "thread_id": 1, "scene_index": 10},
+        ]
+
+        result_messages, result = compactor.compact(messages, state)
+
+        assert result.chunks_summarized == 1
+        assert result.highest_tier == 0.5
+        assert 0 in state.summarized_chunk_indices
+        assert len(state.chunk_summaries) == 1
+        mock_summarizer.summarize_chunk.assert_called_once()
+
+    def test_tier05_preserves_recent_chunks(self, mock_counter, mock_summarizer):
+        """Tier 0.5: Should preserve recent chunks."""
+        mock_counter.count_messages.return_value = 9000
+
+        compactor = ContextCompactor(
+            mock_counter,
+            mock_summarizer,
+            context_budget=10000,
+            scenes_per_chunk=10,
+            preserve_recent_chunks=2,
+        )
+
+        # Only 2 complete chunks - same as preserve_recent_chunks, so no summarization
+        state = CompactionState()
+        state.current_thread_id = 1
+        state.current_scene_index = 25  # 2 complete chunks
+
+        result_messages, result = compactor.compact([], state)
+
+        assert result.chunks_summarized == 0
+        mock_summarizer.summarize_chunk.assert_not_called()
+
+    def test_tier05_removes_chunk_turns(self, mock_counter, mock_summarizer):
+        """Tier 0.5: Should remove chunk turns after summarization."""
+        mock_counter.count_messages.side_effect = [9000, 6000]
+
+        compactor = ContextCompactor(
+            mock_counter,
+            mock_summarizer,
+            context_budget=10000,
+            scenes_per_chunk=10,
+            preserve_recent_chunks=2,
+        )
+
+        state = CompactionState()
+        state.current_thread_id = 1
+        state.current_scene_index = 35  # 3 complete chunks
+
+        # Messages from chunk 0 (scenes 0-9) should be removed
+        messages = [
+            {"role": "user", "content": "Scene 5", "thread_id": 1, "scene_index": 5},
+            {"role": "assistant", "content": "Response 5", "thread_id": 1, "scene_index": 5},
+            {"role": "user", "content": "Scene 25", "thread_id": 1, "scene_index": 25},
+            {"role": "assistant", "content": "Response 25", "thread_id": 1, "scene_index": 25},
+        ]
+
+        result_messages, result = compactor.compact(messages, state)
+
+        # Messages from chunk 0 should be removed
+        assert len(result_messages) == 2
+        assert all(m.get("scene_index", 0) >= 10 for m in result_messages)

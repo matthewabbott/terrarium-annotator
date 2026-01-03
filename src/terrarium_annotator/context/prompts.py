@@ -56,6 +56,26 @@ Entries updated: {entries_updated}
 
 Keep the summary concise (2-4 sentences) while preserving essential context for future annotation work. Focus on information that will help understand future story references."""
 
+# Chunk summarization prompt (Tier 0.5 compaction)
+CHUNK_SUMMARY_PROMPT = """Summarize scenes {first_scene}-{last_scene} of thread {thread_id} for context preservation.
+
+This chunk is being summarized to free context space while the thread continues.
+
+Include in your summary:
+1. Key plot events and narrative developments in these scenes
+2. Important character actions, revelations, or decisions
+3. Glossary entries created or updated (listed below)
+
+<thread_id>{thread_id}</thread_id>
+<scenes>{first_scene} to {last_scene}</scenes>
+
+<glossary_changes>
+Entries created: {entries_created}
+Entries updated: {entries_updated}
+</glossary_changes>
+
+Keep the summary concise (1-3 sentences) while preserving essential context. Focus on information needed to understand subsequent scenes in this thread."""
+
 # Cumulative summary merging prompt (F5)
 CUMULATIVE_SUMMARY_PROMPT = """Merge the following summaries into a single cumulative summary.
 

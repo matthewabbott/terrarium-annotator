@@ -246,6 +246,7 @@ class AnnotationRunner:
         total_tool_calls = 0
         total_inference_time = 0.0
         current_thread_id: int | None = None
+        current_scene_index: int = 0  # 0-indexed within current thread
 
         # Scene iteration
         for scene in self.batcher.iter_scenes(start_after_post_id=start_after_post_id):
@@ -288,7 +289,10 @@ class AnnotationRunner:
                     )
 
                 current_thread_id = scene.thread_id
+                current_scene_index = 0  # Reset scene counter for new thread
                 self._thread_position += 1  # Increment for snapshot ordering (F7)
+                # Initialize chunk tracking for new thread
+                self.compaction_state.start_new_thread(current_thread_id)
                 self.progress.update_thread_state(
                     current_thread_id, status="in_progress"
                 )
@@ -317,6 +321,7 @@ class AnnotationRunner:
                 relevant_entries=relevant_entries,
                 cumulative_summary=self.compaction_state.cumulative_summary or None,
                 thread_summaries=self.compaction_state.thread_summaries or None,
+                chunk_summaries=self.compaction_state.chunk_summaries or None,
             )
 
             # Log context usage metrics
@@ -334,10 +339,14 @@ class AnnotationRunner:
 
             # Execute tool loop
             try:
-                tool_stats = self._run_tool_loop(messages, scene)
+                tool_stats = self._run_tool_loop(messages, scene, current_scene_index)
             except AgentClientError as e:
                 LOGGER.error("Agent call failed, stopping run: %s", e)
                 break
+
+            # Advance scene tracking for chunk compaction
+            current_scene_index += 1
+            self.compaction_state.advance_scene()
 
             # Update progress
             self.progress.update(
@@ -485,6 +494,7 @@ class AnnotationRunner:
         self,
         messages: list[dict],
         scene: Scene,
+        scene_index: int,
     ) -> ToolStats:
         """
         Execute agent with tool calling until completion.
@@ -492,6 +502,7 @@ class AnnotationRunner:
         Args:
             messages: Initial message list for agent.
             scene: Current scene being processed.
+            scene_index: 0-indexed scene number within current thread for chunk compaction.
 
         Returns:
             ToolStats with counts of operations performed.
@@ -502,12 +513,15 @@ class AnnotationRunner:
         initial_len = len(messages)  # Track where new messages start
 
         # Record the user message (scene content) to conversation history
-        # Tag with thread_id for later compaction filtering
+        # Tag with thread_id and scene_index for later compaction filtering
         if messages:
             user_msg = messages[-1]  # Last message is user payload
             if user_msg.get("role") == "user":
                 self.context.record_turn(
-                    "user", user_msg["content"], thread_id=scene.thread_id
+                    "user",
+                    user_msg["content"],
+                    thread_id=scene.thread_id,
+                    scene_index=scene_index,
                 )
 
         for round_num in range(self.config.max_tool_rounds):
@@ -601,10 +615,11 @@ class AnnotationRunner:
             )
 
         # Sync all new messages (assistant + tool) to conversation history
-        # Tag with thread_id for later compaction filtering
+        # Tag with thread_id and scene_index for later compaction filtering
         for msg in current_messages[initial_len:]:
             if msg["role"] in ("assistant", "tool"):
                 msg["thread_id"] = scene.thread_id
+                msg["scene_index"] = scene_index
                 self.context.conversation_history.append(msg)
 
         return stats

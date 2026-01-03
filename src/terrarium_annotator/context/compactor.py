@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from terrarium_annotator.context.metrics import CompactionStats
-from terrarium_annotator.context.models import ThreadSummary
+from terrarium_annotator.context.models import ChunkSummary, ThreadSummary
 from terrarium_annotator.context.prompts import CUMULATIVE_SUMMARY_PROMPT
 
 if TYPE_CHECKING:
@@ -26,12 +26,13 @@ class CompactionResult:
 
     initial_tokens: int
     final_tokens: int
+    chunks_summarized: int
     threads_summarized: int
     summaries_merged: int
     turns_trimmed: int
     responses_truncated: int
     target_reached: bool
-    highest_tier: int = 0  # 0 = no compaction, 1-4 = tier used
+    highest_tier: float = 0  # 0 = no compaction, 0.5/1/2/3/4 = tier used
 
 
 @dataclass
@@ -40,14 +41,24 @@ class CompactionState:
 
     cumulative_summary: str = ""
     thread_summaries: list[ThreadSummary] = field(default_factory=list)
+    chunk_summaries: list[ChunkSummary] = field(default_factory=list)
     completed_thread_ids: list[int] = field(default_factory=list)
+    # Track current thread for chunk compaction
+    current_thread_id: int | None = None
+    current_scene_index: int = 0  # 0-indexed within current thread
+    # Track which chunks have been summarized (indices)
+    summarized_chunk_indices: list[int] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         """Serialize to dict for snapshot storage."""
         return {
             "cumulative_summary": self.cumulative_summary,
             "thread_summaries": [ts.to_dict() for ts in self.thread_summaries],
+            "chunk_summaries": [cs.to_dict() for cs in self.chunk_summaries],
             "completed_thread_ids": self.completed_thread_ids,
+            "current_thread_id": self.current_thread_id,
+            "current_scene_index": self.current_scene_index,
+            "summarized_chunk_indices": self.summarized_chunk_indices,
         }
 
     @classmethod
@@ -58,8 +69,40 @@ class CompactionState:
         state.thread_summaries = [
             ThreadSummary.from_dict(ts) for ts in data.get("thread_summaries", [])
         ]
+        state.chunk_summaries = [
+            ChunkSummary.from_dict(cs) for cs in data.get("chunk_summaries", [])
+        ]
         state.completed_thread_ids = data.get("completed_thread_ids", [])
+        state.current_thread_id = data.get("current_thread_id")
+        state.current_scene_index = data.get("current_scene_index", 0)
+        state.summarized_chunk_indices = data.get("summarized_chunk_indices", [])
         return state
+
+    def start_new_thread(self, thread_id: int) -> None:
+        """Start tracking a new thread, clearing chunk state."""
+        self.current_thread_id = thread_id
+        self.current_scene_index = 0
+        self.chunk_summaries = []
+        self.summarized_chunk_indices = []
+
+    def advance_scene(self) -> None:
+        """Advance to next scene in current thread."""
+        self.current_scene_index += 1
+
+    def get_completed_chunk_count(self, scenes_per_chunk: int) -> int:
+        """Get number of completed chunks (full groups of N scenes)."""
+        return self.current_scene_index // scenes_per_chunk
+
+    def get_unsummarized_chunks(self, scenes_per_chunk: int) -> list[tuple[int, int, int]]:
+        """Get list of (chunk_index, first_scene, last_scene) for unsummarized chunks."""
+        completed_chunks = self.get_completed_chunk_count(scenes_per_chunk)
+        unsummarized = []
+        for i in range(completed_chunks):
+            if i not in self.summarized_chunk_indices:
+                first = i * scenes_per_chunk
+                last = first + scenes_per_chunk - 1
+                unsummarized.append((i, first, last))
+        return unsummarized
 
 
 class ContextCompactor:
@@ -68,24 +111,23 @@ class ContextCompactor:
 
     Context structure after compaction:
     ┌─────────────────────────────────────────────────────────────┐
-    │ cumulative_summary: "The Story So Far" (merged summaries)   │
+    │ cumulative_summary: "The Story So Far" (all past threads)   │
     ├─────────────────────────────────────────────────────────────┤
-    │ thread_summaries: [Thread N, N+1, N+2] (3 recent, with IDs) │
+    │ chunk_summaries: [Chunk 0, 1, 2...] (for current thread)    │
     ├─────────────────────────────────────────────────────────────┤
-    │ Full conversation: recent threads                           │
+    │ Full conversation: recent chunks only (last 2-3)            │
     └─────────────────────────────────────────────────────────────┘
 
     Thresholds:
     - Under 60%: No compaction needed
-    - ≥80%: Loop Tier 1 until <60% (summarize oldest threads)
-    - >3 summaries: Tier 2 merges oldest into cumulative
+    - ≥80%: Tier 0.5 (chunks) or Tier 1 (threads) until <60%
     - ≥90%: Emergency Tiers 3-4 (trim thinking, truncate)
 
     Tiers:
-    1. Summarize oldest completed thread → add to thread_summaries
-    2. Merge oldest 2 summaries into cumulative (keeps 3 recent with entry IDs)
-    3. Trim <thinking> blocks from old messages (emergency)
-    4. Truncate old assistant responses (emergency)
+    0.5. Summarize oldest completed chunk → add to chunk_summaries (intra-thread)
+    1.   Summarize thread → merge into cumulative_summary (thread boundary)
+    3.   Trim <thinking> blocks from old messages (emergency)
+    4.   Truncate old assistant responses (emergency)
 
     Key insight: Compaction modifies BOTH the messages list AND the
     underlying conversation_history, so changes persist across scenes.
@@ -101,19 +143,23 @@ class ContextCompactor:
         thread_compact_ratio: float = 0.80,
         emergency_ratio: float = 0.90,
         target_ratio: float = 0.70,
+        scenes_per_chunk: int = 10,
+        preserve_recent_chunks: int = 2,
     ) -> None:
         """
         Initialize compactor.
 
         Args:
             token_counter: TokenCounter for measuring context size.
-            summarizer: ThreadSummarizer for tier 1.
-            agent_client: Optional AgentClient for tier 2 summary merging.
+            summarizer: ThreadSummarizer for tier 1 and chunk summarization.
+            agent_client: Optional AgentClient for summary merging.
             context_budget: Total context budget in tokens.
             soft_ratio: Under this, skip compaction entirely (default 60%).
             thread_compact_ratio: Enable rolling compaction (default 80%).
             emergency_ratio: Emergency compaction with all tiers (default 90%).
             target_ratio: Target ratio after compaction (default 70%).
+            scenes_per_chunk: Number of scenes per chunk for Tier 0.5 (default 10).
+            preserve_recent_chunks: Keep this many recent chunks intact (default 2).
         """
         self.counter = token_counter
         self.summarizer = summarizer
@@ -123,6 +169,8 @@ class ContextCompactor:
         self.thread_compact_threshold = int(context_budget * thread_compact_ratio)
         self.emergency_threshold = int(context_budget * emergency_ratio)
         self.target = int(context_budget * target_ratio)
+        self.scenes_per_chunk = scenes_per_chunk
+        self.preserve_recent_chunks = preserve_recent_chunks
         self._stats = CompactionStats()
 
     def should_compact_thread(self, messages: list[dict]) -> bool:
@@ -184,6 +232,7 @@ class ContextCompactor:
         result = CompactionResult(
             initial_tokens=initial_tokens,
             final_tokens=initial_tokens,
+            chunks_summarized=0,
             threads_summarized=0,
             summaries_merged=0,
             turns_trimmed=0,
@@ -222,12 +271,79 @@ class ContextCompactor:
                 break
             prev_tokens = current_tokens
 
-            # Tier 1: Summarize oldest completed thread
+            # Tier 0.5: Chunk compaction (intra-thread)
+            # Summarize oldest completed chunk, preserve recent N chunks
+            unsummarized = state.get_unsummarized_chunks(self.scenes_per_chunk)
+            completed_chunks = state.get_completed_chunk_count(self.scenes_per_chunk)
+            # How many chunks we need to keep intact (recent ones)
+            chunks_to_keep = self.preserve_recent_chunks
+            # How many we can summarize = completed - keep
+            summarizable = completed_chunks - chunks_to_keep - len(state.summarized_chunk_indices)
+
+            if summarizable > 0 and unsummarized:
+                # Summarize oldest unsummarized chunk
+                chunk_idx, first_scene, last_scene = unsummarized[0]
+                LOGGER.info(
+                    "Tier 0.5: Summarizing chunk %d (scenes %d-%d) of thread %d",
+                    chunk_idx,
+                    first_scene,
+                    last_scene,
+                    state.current_thread_id,
+                )
+
+                # Get conversation turns for this chunk
+                chunk_messages = [
+                    m
+                    for m in messages
+                    if (
+                        m.get("thread_id") == state.current_thread_id
+                        and m.get("scene_index") is not None
+                        and first_scene <= m.get("scene_index") <= last_scene
+                    )
+                ]
+
+                # Summarize the chunk
+                chunk_summary = self.summarizer.summarize_chunk(
+                    thread_id=state.current_thread_id or 0,
+                    chunk_index=chunk_idx,
+                    first_scene_index=first_scene,
+                    last_scene_index=last_scene,
+                    conversation_excerpt=chunk_messages,
+                )
+                state.chunk_summaries.append(chunk_summary)
+                state.summarized_chunk_indices.append(chunk_idx)
+
+                # Remove chunk turns from messages AND persistent history
+                messages = self._remove_chunk_turns(
+                    messages, state.current_thread_id or 0, first_scene, last_scene
+                )
+                if context is not None:
+                    removed = context.remove_chunk_turns(
+                        state.current_thread_id or 0, first_scene, last_scene
+                    )
+                    LOGGER.debug(
+                        "Removed %d turns for chunk %d (scenes %d-%d)",
+                        removed,
+                        chunk_idx,
+                        first_scene,
+                        last_scene,
+                    )
+
+                result.chunks_summarized += 1
+                result.highest_tier = max(result.highest_tier, 0.5)
+                current_tokens = self.counter.count_messages(messages)
+
+                if current_tokens < self.soft_threshold:
+                    result.target_reached = True
+                    break
+                continue
+
+            # Tier 1: Summarize oldest completed thread → merge into cumulative
             # Only if we have 2+ completed threads (preserve current thread's context)
             if len(state.completed_thread_ids) > 1:
                 oldest_id = state.completed_thread_ids.pop(0)
                 LOGGER.info(
-                    "Tier 1: Summarizing thread %d (%d completed remain)",
+                    "Tier 1: Summarizing thread %d and merging to cumulative (%d completed remain)",
                     oldest_id,
                     len(state.completed_thread_ids),
                 )
@@ -240,11 +356,13 @@ class ContextCompactor:
                     oldest_id,
                     thread_messages,
                 )
-                state.thread_summaries.append(
-                    self.summarizer.to_thread_summary(
-                        summary_result,
-                        position=len(state.thread_summaries),
-                    )
+
+                # Immediately merge into cumulative instead of keeping separate summaries
+                thread_summary = self.summarizer.to_thread_summary(
+                    summary_result, position=0
+                )
+                state.cumulative_summary = self._merge_summaries(
+                    state.cumulative_summary, [thread_summary]
                 )
 
                 # Remove from messages AND persistent history
@@ -258,6 +376,7 @@ class ContextCompactor:
                     )
 
                 result.threads_summarized += 1
+                result.summaries_merged += 1  # Since we merge immediately
                 result.highest_tier = max(result.highest_tier, 1)
                 current_tokens = self.counter.count_messages(messages)
 
@@ -265,20 +384,6 @@ class ContextCompactor:
                 if current_tokens < self.soft_threshold:
                     result.target_reached = True
                     break
-                continue
-
-            # Tier 2: Merge old summaries into cumulative (runs when >3 summaries)
-            # NOT emergency-only - keeps exactly 3 recent summaries with entry IDs
-            if len(state.thread_summaries) > 3:
-                LOGGER.info("Tier 2: Merging old summaries into cumulative")
-                oldest_summaries = state.thread_summaries[:2]
-                state.thread_summaries = state.thread_summaries[2:]
-                state.cumulative_summary = self._merge_summaries(
-                    state.cumulative_summary, oldest_summaries
-                )
-                result.summaries_merged += 2
-                result.highest_tier = max(result.highest_tier, 2)
-                current_tokens = self.counter.count_messages(messages)
                 continue
 
             # Below here: emergency-only tiers (90%+ threshold)
@@ -354,6 +459,32 @@ class ContextCompactor:
         Messages without thread_id are preserved.
         """
         return [m for m in messages if m.get("thread_id") != thread_id]
+
+    def _remove_chunk_turns(
+        self,
+        messages: list[dict],
+        thread_id: int,
+        first_scene: int,
+        last_scene: int,
+    ) -> list[dict]:
+        """Remove turns for a summarized chunk within a thread.
+
+        Filters out messages from the specified thread and scene range.
+        Messages without scene_index are preserved (tool calls, etc.).
+        """
+
+        def should_keep(msg: dict) -> bool:
+            # Keep turns from other threads
+            if msg.get("thread_id") != thread_id:
+                return True
+            # Keep turns without scene_index
+            scene_idx = msg.get("scene_index")
+            if scene_idx is None:
+                return True
+            # Remove turns within the chunk's scene range
+            return not (first_scene <= scene_idx <= last_scene)
+
+        return [m for m in messages if should_keep(m)]
 
     def _merge_summaries(self, cumulative: str, summaries: list[ThreadSummary]) -> str:
         """Merge thread summaries into cumulative summary."""

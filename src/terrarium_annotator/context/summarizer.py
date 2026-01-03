@@ -6,8 +6,8 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from terrarium_annotator.context.models import ThreadSummary
-from terrarium_annotator.context.prompts import THREAD_SUMMARY_PROMPT
+from terrarium_annotator.context.models import ChunkSummary, ThreadSummary
+from terrarium_annotator.context.prompts import CHUNK_SUMMARY_PROMPT, THREAD_SUMMARY_PROMPT
 
 if TYPE_CHECKING:
     from terrarium_annotator.agent_client import AgentClient
@@ -203,4 +203,166 @@ class ThreadSummarizer:
             summary_text=result.summary_text,
             entries_created=result.entries_created,
             entries_updated=result.entries_updated,
+        )
+
+    def summarize_chunk(
+        self,
+        thread_id: int,
+        chunk_index: int,
+        first_scene_index: int,
+        last_scene_index: int,
+        conversation_excerpt: list[dict] | None = None,
+        entries_created: list[int] | None = None,
+        entries_updated: list[int] | None = None,
+    ) -> ChunkSummary:
+        """
+        Generate summary for a scene chunk within a thread.
+
+        Used for Tier 0.5 compaction when a single thread grows too large.
+
+        Args:
+            thread_id: Thread containing the chunk.
+            chunk_index: Index of chunk within thread (0, 1, 2...).
+            first_scene_index: First scene in chunk (inclusive).
+            last_scene_index: Last scene in chunk (inclusive).
+            conversation_excerpt: Conversation turns from this chunk.
+            entries_created: Entry IDs created in these scenes (passed by runner).
+            entries_updated: Entry IDs updated in these scenes (passed by runner).
+
+        Returns:
+            ChunkSummary with summary text and metadata.
+        """
+        entries_created = entries_created or []
+        entries_updated = entries_updated or []
+
+        LOGGER.debug(
+            "Summarizing chunk %d (scenes %d-%d) of thread %d: %d created, %d updated",
+            chunk_index,
+            first_scene_index,
+            last_scene_index,
+            thread_id,
+            len(entries_created),
+            len(entries_updated),
+        )
+
+        # Build summarization prompt
+        messages = self._build_chunk_summary_messages(
+            thread_id,
+            first_scene_index,
+            last_scene_index,
+            conversation_excerpt or [],
+            entries_created,
+            entries_updated,
+        )
+
+        # Try agent summarization
+        summary_text = ""
+        try:
+            response = self.agent.chat(
+                messages=messages,
+                max_tokens=self.max_tokens,
+                temperature=0.3,
+            )
+            summary_text = response.message.get("content", "")
+        except Exception as e:
+            LOGGER.warning(
+                "Agent summarization failed for chunk %d of thread %d: %s",
+                chunk_index,
+                thread_id,
+                e,
+            )
+
+        # Fallback to heuristic if agent fails
+        if not summary_text.strip():
+            LOGGER.info(
+                "Using heuristic summary for chunk %d of thread %d",
+                chunk_index,
+                thread_id,
+            )
+            summary_text = self._heuristic_chunk_summary(
+                thread_id, chunk_index, first_scene_index, last_scene_index
+            )
+
+        return ChunkSummary(
+            thread_id=thread_id,
+            chunk_index=chunk_index,
+            first_scene_index=first_scene_index,
+            last_scene_index=last_scene_index,
+            summary_text=summary_text,
+            entries_created=entries_created,
+            entries_updated=entries_updated,
+        )
+
+    def _build_chunk_summary_messages(
+        self,
+        thread_id: int,
+        first_scene: int,
+        last_scene: int,
+        conversation: list[dict],
+        created_ids: list[int],
+        updated_ids: list[int],
+    ) -> list[dict]:
+        """Build messages for chunk summarization request."""
+        # Get entry terms from IDs
+        created_terms = []
+        updated_terms = []
+
+        for entry_id in created_ids[:10]:
+            entry = self.glossary.get(entry_id)
+            if entry:
+                created_terms.append(entry.term)
+
+        for entry_id in updated_ids[:10]:
+            entry = self.glossary.get(entry_id)
+            if entry:
+                updated_terms.append(entry.term)
+
+        created_str = ", ".join(created_terms)
+        if len(created_ids) > 10:
+            created_str += f" (+{len(created_ids) - 10} more)"
+
+        updated_str = ", ".join(updated_terms)
+        if len(updated_ids) > 10:
+            updated_str += f" (+{len(updated_ids) - 10} more)"
+
+        prompt = CHUNK_SUMMARY_PROMPT.format(
+            thread_id=thread_id,
+            first_scene=first_scene,
+            last_scene=last_scene,
+            entries_created=created_str or "(none)",
+            entries_updated=updated_str or "(none)",
+        )
+
+        messages: list[dict] = [{"role": "system", "content": prompt}]
+
+        # Add conversation excerpt if provided
+        if conversation:
+            # Take last few turns from chunk for context
+            recent = conversation[-6:]
+            for turn in recent:
+                if turn.get("role") in ("user", "assistant"):
+                    content = turn.get("content", "")
+                    if content and len(content) > 500:
+                        content = content[:500] + "..."
+                    messages.append({"role": turn["role"], "content": content})
+
+        # Add user request
+        messages.append({
+            "role": "user",
+            "content": "Please provide a concise summary of this scene chunk.",
+        })
+
+        return messages
+
+    def _heuristic_chunk_summary(
+        self,
+        thread_id: int,
+        chunk_index: int,
+        first_scene: int,
+        last_scene: int,
+    ) -> str:
+        """Fallback summary when agent unavailable."""
+        return (
+            f"Thread {thread_id}, chunk {chunk_index} "
+            f"(scenes {first_scene}-{last_scene}) processed."
         )

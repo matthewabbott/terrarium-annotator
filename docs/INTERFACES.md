@@ -278,7 +278,8 @@ class AnnotationContext:
         self,
         *,
         cumulative_summary: str | None,
-        thread_summaries: list[ThreadSummary],
+        thread_summaries: list[ThreadSummary] | None,
+        chunk_summaries: list[ChunkSummary] | None,
         current_scene: Scene,
         relevant_entries: list[GlossaryEntry],
         tools: list[dict]
@@ -290,9 +291,22 @@ class AnnotationContext:
         role: Literal["user", "assistant", "tool"],
         content: str,
         *,
-        tool_call_id: str | None = None
+        tool_call_id: str | None = None,
+        thread_id: int | None = None,
+        scene_index: int | None = None
     ) -> None:
-        """Add turn to conversation history."""
+        """Add turn to conversation history with compaction tags."""
+
+    def remove_thread_turns(self, thread_id: int) -> int:
+        """Remove all turns for a thread. Returns count removed."""
+
+    def remove_chunk_turns(
+        self,
+        thread_id: int,
+        first_scene_index: int,
+        last_scene_index: int
+    ) -> int:
+        """Remove turns within a scene chunk. Returns count removed."""
 
     def get_history(self) -> list[dict]:
         """Get conversation history (for serialization)."""

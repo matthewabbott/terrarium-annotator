@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from terrarium_annotator.context.models import ThreadSummary
+    from terrarium_annotator.context.models import ChunkSummary, ThreadSummary
     from terrarium_annotator.corpus import Scene
     from terrarium_annotator.storage import GlossaryEntry
 
@@ -24,6 +24,7 @@ class AnnotationContext:
         *,
         cumulative_summary: str | None = None,
         thread_summaries: list[ThreadSummary] | None = None,
+        chunk_summaries: list[ChunkSummary] | None = None,
         current_scene: Scene | None = None,
         relevant_entries: list[GlossaryEntry] | None = None,
         tools: list[dict] | None = None,
@@ -33,13 +34,15 @@ class AnnotationContext:
         Constructs messages in order:
         1. System prompt
         2. Cumulative summary (if provided)
-        3. Thread summaries (if provided)
-        4. Full conversation history (compaction handles size limits)
-        5. User message with current scene and relevant glossary entries
+        3. Thread summaries (if provided, legacy - prefer cumulative)
+        4. Chunk summaries (if provided, for current thread's old chunks)
+        5. Full conversation history (compaction handles size limits)
+        6. User message with current scene and relevant glossary entries
 
         Args:
             cumulative_summary: Running summary of all completed threads.
-            thread_summaries: Summaries of recently completed threads.
+            thread_summaries: Summaries of recently completed threads (legacy).
+            chunk_summaries: Summaries of old scene chunks in current thread.
             current_scene: Scene being annotated.
             relevant_entries: Glossary entries to include for context.
             tools: Tool definitions (currently unused, for future tool_choice).
@@ -59,13 +62,23 @@ class AnnotationContext:
                 }
             )
 
-        # Add thread summaries
+        # Add thread summaries (legacy - prefer merging into cumulative)
         if thread_summaries:
             summaries_xml = self._format_thread_summaries(thread_summaries)
             messages.append(
                 {
                     "role": "system",
                     "content": summaries_xml,
+                }
+            )
+
+        # Add chunk summaries for current thread
+        if chunk_summaries:
+            chunks_xml = self._format_chunk_summaries(chunk_summaries)
+            messages.append(
+                {
+                    "role": "system",
+                    "content": chunks_xml,
                 }
             )
 
@@ -89,6 +102,7 @@ class AnnotationContext:
         *,
         tool_call_id: str | None = None,
         thread_id: int | None = None,
+        scene_index: int | None = None,
     ) -> None:
         """Record a conversation turn in history.
 
@@ -100,12 +114,16 @@ class AnnotationContext:
             thread_id: Thread ID to tag this turn for later filtering during
                 compaction. Turns without thread_id are preserved during
                 thread-based compaction.
+            scene_index: Scene index within thread for chunk-based compaction.
+                Enables removal of old chunks while preserving recent ones.
         """
         turn: dict = {"role": role, "content": content}
         if tool_call_id is not None:
             turn["tool_call_id"] = tool_call_id
         if thread_id is not None:
             turn["thread_id"] = thread_id
+        if scene_index is not None:
+            turn["scene_index"] = scene_index
         self.conversation_history.append(turn)
 
     def remove_thread_turns(self, thread_id: int) -> int:
@@ -125,6 +143,43 @@ class AnnotationContext:
             turn
             for turn in self.conversation_history
             if turn.get("thread_id") != thread_id
+        ]
+        return original_len - len(self.conversation_history)
+
+    def remove_chunk_turns(
+        self,
+        thread_id: int,
+        first_scene_index: int,
+        last_scene_index: int,
+    ) -> int:
+        """Remove turns belonging to a specific scene chunk within a thread.
+
+        Used by chunk compaction (Tier 0.5) to remove old chunks' turns
+        after they've been summarized, while preserving recent chunks.
+
+        Args:
+            thread_id: The thread ID containing the chunk.
+            first_scene_index: First scene index in the chunk (inclusive).
+            last_scene_index: Last scene index in the chunk (inclusive).
+
+        Returns:
+            Number of turns removed.
+        """
+        original_len = len(self.conversation_history)
+
+        def should_keep(turn: dict) -> bool:
+            # Keep turns from other threads
+            if turn.get("thread_id") != thread_id:
+                return True
+            # Keep turns without scene_index (tool calls, etc.)
+            scene_idx = turn.get("scene_index")
+            if scene_idx is None:
+                return True
+            # Remove turns within the chunk's scene range
+            return not (first_scene_index <= scene_idx <= last_scene_index)
+
+        self.conversation_history = [
+            turn for turn in self.conversation_history if should_keep(turn)
         ]
         return original_len - len(self.conversation_history)
 
@@ -206,4 +261,26 @@ class AnnotationContext:
                 f"{ts.summary_text}</thread>"
             )
         lines.append("</thread_summaries>")
+        return "\n".join(lines)
+
+    def _format_chunk_summaries(self, summaries: list[ChunkSummary]) -> str:
+        """Format chunk summaries as XML block with entry IDs.
+
+        Chunk summaries represent groups of consecutive scenes within the
+        current thread that have been compacted. Entry IDs help the agent
+        track which glossary entries were created/updated in each chunk.
+        """
+        lines = ["<chunk_summaries>"]
+        for cs in summaries:
+            # Include entry IDs if any were created/updated
+            entries_attr = ""
+            if cs.entries_created or cs.entries_updated:
+                all_ids = cs.entries_created + cs.entries_updated
+                entries_attr = f' entries="{",".join(map(str, all_ids))}"'
+            lines.append(
+                f'<chunk thread="{cs.thread_id}" index="{cs.chunk_index}" '
+                f'scenes="{cs.first_scene_index}-{cs.last_scene_index}"{entries_attr}>'
+                f"{cs.summary_text}</chunk>"
+            )
+        lines.append("</chunk_summaries>")
         return "\n".join(lines)
