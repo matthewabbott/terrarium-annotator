@@ -44,6 +44,7 @@ class SnapshotContext:
     conversation_history: list[dict]
     current_thread_id: int | None
     completed_thread_ids: list[int]  # For proper Tier 1 compaction on resume
+    compaction_state: dict | None = None  # Full CompactionState for chunk resume
 
 
 @dataclass
@@ -138,8 +139,8 @@ class SnapshotStore:
                     INSERT INTO snapshot_context (
                         snapshot_id, system_prompt, cumulative_summary,
                         thread_summaries, conversation_history, current_thread_id,
-                        completed_thread_ids
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        completed_thread_ids, compaction_state
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         snapshot_id,
@@ -149,6 +150,7 @@ class SnapshotStore:
                         json.dumps(context_dict.get("conversation_history", [])),
                         last_thread_id,
                         json.dumps(compaction_dict.get("completed_thread_ids", [])),
+                        json.dumps(compaction_dict),  # Full compaction state for chunk resume
                     ),
                 )
 
@@ -212,7 +214,7 @@ class SnapshotStore:
                 """
                 SELECT snapshot_id, system_prompt, cumulative_summary,
                        thread_summaries, conversation_history, current_thread_id,
-                       completed_thread_ids
+                       completed_thread_ids, compaction_state
                 FROM snapshot_context
                 WHERE snapshot_id = ?
                 """,
@@ -222,6 +224,11 @@ class SnapshotStore:
             if row is None:
                 return None
 
+            # Parse compaction_state if present (migration 006)
+            compaction_state = None
+            if row["compaction_state"]:
+                compaction_state = json.loads(row["compaction_state"])
+
             return SnapshotContext(
                 snapshot_id=row["snapshot_id"],
                 system_prompt=row["system_prompt"],
@@ -230,6 +237,7 @@ class SnapshotStore:
                 conversation_history=json.loads(row["conversation_history"]),
                 current_thread_id=row["current_thread_id"],
                 completed_thread_ids=json.loads(row["completed_thread_ids"] or "[]"),
+                compaction_state=compaction_state,
             )
         except sqlite3.Error as e:
             raise DatabaseError(f"Get snapshot context {snapshot_id} failed: {e}") from e
@@ -308,6 +316,42 @@ class SnapshotStore:
         except sqlite3.Error as e:
             raise DatabaseError(f"List snapshots failed: {e}") from e
 
+    def get_latest_checkpoint(self) -> Snapshot | None:
+        """Get the most recent checkpoint snapshot.
+
+        Returns the latest checkpoint. The snapshot's last_post_id is the
+        authoritative resume position - we don't filter by context size
+        because even a small snapshot represents valid progress.
+        """
+        try:
+            cursor = self.conn.execute(
+                """
+                SELECT id, snapshot_type, created_at, last_post_id,
+                       last_thread_id, thread_position, glossary_entry_count,
+                       context_token_count, metadata
+                FROM snapshot
+                WHERE snapshot_type = 'checkpoint'
+                ORDER BY created_at DESC
+                LIMIT 1
+                """
+            )
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            return Snapshot(
+                id=row["id"],
+                snapshot_type=row["snapshot_type"],
+                created_at=row["created_at"],
+                last_post_id=row["last_post_id"],
+                last_thread_id=row["last_thread_id"],
+                thread_position=row["thread_position"],
+                glossary_entry_count=row["glossary_entry_count"],
+                context_token_count=row["context_token_count"],
+                metadata=json.loads(row["metadata"]) if row["metadata"] else None,
+            )
+        except sqlite3.Error as e:
+            raise DatabaseError(f"Get latest checkpoint failed: {e}") from e
+
     def list_by_thread(self, thread_id: int) -> list[Snapshot]:
         """List snapshots for a specific thread."""
         try:
@@ -369,11 +413,16 @@ class SnapshotStore:
         })
 
         # Reconstruct CompactionState
-        compaction = CompactionState.from_dict({
-            "cumulative_summary": ctx_data.cumulative_summary or "",
-            "thread_summaries": ctx_data.thread_summaries,
-            "completed_thread_ids": ctx_data.completed_thread_ids,
-        })
+        # Use full compaction_state if available (migration 006), else legacy fields
+        if ctx_data.compaction_state:
+            compaction = CompactionState.from_dict(ctx_data.compaction_state)
+        else:
+            # Legacy snapshots: reconstruct from separate fields
+            compaction = CompactionState.from_dict({
+                "cumulative_summary": ctx_data.cumulative_summary or "",
+                "thread_summaries": ctx_data.thread_summaries,
+                "completed_thread_ids": ctx_data.completed_thread_ids,
+            })
 
         return context, compaction
 

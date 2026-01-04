@@ -392,6 +392,10 @@ Enhancements:
 - F9 (Resume from Snapshot) - 2026-01-03
   - `run --from-snapshot <id>` restores full context state
   - Resumes annotation from snapshot position
+- F9.1 (Auto-Load Snapshot on Resume) - 2026-01-03
+  - Runner auto-loads latest checkpoint when resuming
+  - Full CompactionState persisted in snapshots (migration 006)
+  - Fixes Tier 0.5 not triggering after resume
 
 See `docs/worklog/` for session notes.
 

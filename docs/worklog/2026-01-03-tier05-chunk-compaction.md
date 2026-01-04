@@ -157,5 +157,51 @@ else:
 All 262 tests pass (35 compactor tests including 6 new adaptive tests)
 
 ---
+
+## F9.1 Auto-Load Snapshot on Resume (Session 3)
+
+### Problem
+
+When resuming with `--resume`, the runner used the global progress tracker's `last_post_id`
+but didn't load any snapshot context. This meant:
+- Conversation history was empty
+- Cumulative summary was lost
+- Chunk compaction state was lost
+- Compaction couldn't work (no `current_scene_index`, no `chunk_summaries`)
+
+### Solution
+
+1. **Auto-load latest checkpoint**: Runner now auto-loads the most recent checkpoint
+   snapshot when `resume=True` and no explicit `--from-snapshot` is given.
+
+2. **Snapshot's post_id is authoritative**: Resume position comes from the snapshot's
+   `last_post_id`, not the global progress tracker. This ensures we continue from
+   exactly where the snapshot was taken.
+
+3. **Full CompactionState in snapshots**: Added `compaction_state` column to
+   `snapshot_context` table (migration 006) to persist all chunk compaction fields:
+   - `current_scene_index`
+   - `chunk_summaries`
+   - `summarized_chunk_indices`
+   - `current_thread_id`
+
+### Files Changed
+
+- `src/terrarium_annotator/storage/migrations.py` - Migration 006: compaction_state column
+- `src/terrarium_annotator/storage/snapshots.py` - Save/restore full CompactionState
+- `src/terrarium_annotator/runner.py` - Auto-load latest checkpoint on resume
+
+### Why Tier 0.5 Was Failing
+
+Without `current_scene_index` persisted, snapshots restored with `current_scene_index=0`.
+The Tier 0.5 logic checks:
+```python
+if state.current_scene_index >= 6 and not state.summarized_chunk_indices:
+    # Partial chunk fallback
+```
+
+With `current_scene_index=0`, this never triggered - hence `tier: 0` in the logs.
+
+---
 *Agent: Claude Opus 4.5*
-*Duration: ~2.5 hours total (F5.1 + F5.2)*
+*Duration: ~3 hours total (F5.1 + F5.2 + F9.1)*

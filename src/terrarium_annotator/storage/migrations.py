@@ -235,6 +235,18 @@ MIGRATION_005_SNAPSHOT_THREAD_IDS = Migration(
     ],
 )
 
+# Migration 006: Add compaction_state to snapshot_context for chunk compaction resume
+MIGRATION_006_COMPACTION_STATE = Migration(
+    version=6,
+    name="snapshot_compaction_state",
+    statements=[
+        """
+        ALTER TABLE snapshot_context
+        ADD COLUMN compaction_state TEXT DEFAULT '{}'
+        """,
+    ],
+)
+
 # All migrations in order
 ALL_MIGRATIONS: list[Migration] = [
     MIGRATION_001_INITIAL,
@@ -242,6 +254,7 @@ ALL_MIGRATIONS: list[Migration] = [
     MIGRATION_003_SNAPSHOT_FK,
     MIGRATION_004_REVISION_CASCADE_FIX,
     MIGRATION_005_SNAPSHOT_THREAD_IDS,
+    MIGRATION_006_COMPACTION_STATE,
 ]
 
 

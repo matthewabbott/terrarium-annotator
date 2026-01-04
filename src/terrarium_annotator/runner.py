@@ -146,26 +146,37 @@ class AnnotationRunner:
         )
         self.compaction_state = CompactionState()
 
-        # F9: Restore from snapshot if specified
-        if config.from_snapshot_id is not None:
+        # F9: Restore from snapshot
+        # Priority: explicit --from-snapshot > auto-load latest on resume
+        snapshot_to_restore: int | None = config.from_snapshot_id
+        if snapshot_to_restore is None and config.resume and self.snapshots is not None:
+            # Auto-load latest checkpoint with substantial context
+            latest = self.snapshots.get_latest_checkpoint()
+            if latest is not None:
+                snapshot_to_restore = latest.id
+                LOGGER.info(
+                    f"Auto-loading latest checkpoint {latest.id} for resume"
+                )
+
+        if snapshot_to_restore is not None:
             if self.snapshots is None:
                 raise ValueError(
                     "Cannot resume from snapshot: snapshots are disabled"
                 )
-            snapshot = self.snapshots.get(config.from_snapshot_id)
+            snapshot = self.snapshots.get(snapshot_to_restore)
             if snapshot is None:
                 raise ValueError(
-                    f"Snapshot {config.from_snapshot_id} not found"
+                    f"Snapshot {snapshot_to_restore} not found"
                 )
             # Restore context and compaction state
             self.context, self.compaction_state = self.snapshots.restore_context(
-                config.from_snapshot_id
+                snapshot_to_restore
             )
             # Set resume position from snapshot metadata
             self._resume_from_snapshot_post_id = snapshot.last_post_id
             self._thread_position = snapshot.thread_position
             LOGGER.info(
-                f"Restored from snapshot {config.from_snapshot_id}: "
+                f"Restored from snapshot {snapshot_to_restore}: "
                 f"post {snapshot.last_post_id}, thread {snapshot.last_thread_id}, "
                 f"position {snapshot.thread_position}"
             )
