@@ -7,7 +7,7 @@
 | **F0: Storage Layer** | :white_check_mark: Complete | SQLite + migrations + FTS5 |
 | **F1: Corpus Layer** | :white_check_mark: Complete | CorpusReader + SceneBatcher |
 | **F2: Context Layer** | :white_check_mark: Complete | TokenCounter + AnnotationContext + ThreadSummarizer + ContextCompactor |
-| **F3: Tool Layer** | :white_check_mark: Complete | ToolDispatcher + all 6 tools + 36 tests |
+| **F3: Tool Layer** | :white_check_mark: Complete | ToolDispatcher + 10 tools (glossary+codex) + 38 tests |
 | **F3.5: Documentation & Logging** | :white_check_mark: Complete | Docstrings + basic logging |
 | **F4: Runner MVP** | :white_check_mark: Complete | Scene-based iteration + tool call loop + 18 tests |
 | **F5: Compaction** | :white_check_mark: Complete | ThreadSummarizer + ContextCompactor + 29 tests |
@@ -396,6 +396,14 @@ Enhancements:
   - Runner auto-loads latest checkpoint when resuming
   - Full CompactionState persisted in snapshots (migration 006)
   - Fixes Tier 0.5 not triggering after resume
+- F10 (Glossary v2: Split Glossary/Codex) - 2026-01-03
+  - Distinguishes glossary (jargon/vocabulary) from codex (wiki entities)
+  - Migration 007: `entry_type` column (glossary/codex)
+  - 8 tools: glossary_* and codex_* variants
+  - `--sweep-mode` CLI arg (glossary/codex/both)
+  - Mode-specific prompts for focused curation passes
+  - Novel term detection with NLTK words corpus
+  - Detects: novel terms, capitalized common words (semantic jargon), existing glossary terms
 
 See `docs/worklog/` for session notes.
 

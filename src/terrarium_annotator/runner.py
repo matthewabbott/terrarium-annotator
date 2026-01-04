@@ -17,7 +17,7 @@ from terrarium_annotator.context import (
     ContextCompactor,
     ThreadSummarizer,
     TokenCounter,
-    TOOL_SYSTEM_PROMPT,
+    get_system_prompt,
 )
 from terrarium_annotator.corpus import CorpusReader, SceneBatcher
 from terrarium_annotator.curator import CuratorFork
@@ -60,6 +60,8 @@ class RunnerConfig:
     enable_snapshots: bool = True
     # Resume from snapshot (F9)
     from_snapshot_id: int | None = None
+    # Sweep mode (F10): "glossary", "codex", or "both"
+    sweep_mode: str = "both"
 
 
 @dataclass
@@ -112,7 +114,7 @@ class AnnotationRunner:
 
         # Context (F2) - may be restored from snapshot below
         self.context = AnnotationContext(
-            system_prompt=TOOL_SYSTEM_PROMPT,
+            system_prompt=get_system_prompt(config.sweep_mode),
         )
 
         # Tools (F3)
@@ -553,7 +555,7 @@ class AnnotationRunner:
             ToolStats with counts of operations performed.
         """
         stats = ToolStats()
-        tools = self.dispatcher.get_tool_definitions()
+        tools = self.dispatcher.get_tool_definitions(sweep_mode=self.config.sweep_mode)
         current_messages = list(messages)  # Copy to preserve original
         initial_len = len(messages)  # Track where new messages start
 

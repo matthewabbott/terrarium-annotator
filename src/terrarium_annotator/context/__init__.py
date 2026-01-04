@@ -14,6 +14,7 @@ from terrarium_annotator.context.prompts import (
     SYSTEM_PROMPT,
     THREAD_SUMMARY_PROMPT,
     TOOL_SYSTEM_PROMPT,
+    get_system_prompt,
 )
 from terrarium_annotator.context.summarizer import SummaryResult, ThreadSummarizer
 from terrarium_annotator.context.token_counter import TokenCounter
@@ -31,6 +32,7 @@ __all__ = [
     "ContextCompactor",
     "ContextMetrics",
     "CUMULATIVE_SUMMARY_PROMPT",
+    "get_system_prompt",
     "NewAnnotationContext",  # Alias for backwards compatibility
     "SummaryResult",
     "SYSTEM_PROMPT",

@@ -94,6 +94,12 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="ID",
         help="Resume from snapshot ID (restores full context state)",
     )
+    run_parser.add_argument(
+        "--sweep-mode",
+        choices=["glossary", "codex", "both"],
+        default="both",
+        help="Which entry types to focus on: glossary (jargon), codex (wiki), or both (default: both)",
+    )
 
     # Export command
     export_parser = subparsers.add_parser("export", help="Export glossary to JSON/YAML")
@@ -682,6 +688,7 @@ def run(args: argparse.Namespace) -> None:
         max_tool_rounds=args.max_tool_rounds,
         context_budget=args.context_budget,
         from_snapshot_id=getattr(args, "from_snapshot", None),
+        sweep_mode=args.sweep_mode,
     )
     runner = AnnotationRunner(config)
     try:

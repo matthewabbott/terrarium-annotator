@@ -247,6 +247,20 @@ MIGRATION_006_COMPACTION_STATE = Migration(
     ],
 )
 
+# Migration 007: Add entry_type column to distinguish glossary vs codex entries
+MIGRATION_007_ENTRY_TYPE = Migration(
+    version=7,
+    name="glossary_entry_type",
+    statements=[
+        """
+        ALTER TABLE glossary_entry
+        ADD COLUMN entry_type TEXT NOT NULL DEFAULT 'glossary'
+            CHECK (entry_type IN ('glossary', 'codex'))
+        """,
+        "CREATE INDEX idx_glossary_entry_type ON glossary_entry(entry_type)",
+    ],
+)
+
 # All migrations in order
 ALL_MIGRATIONS: list[Migration] = [
     MIGRATION_001_INITIAL,
@@ -255,6 +269,7 @@ ALL_MIGRATIONS: list[Migration] = [
     MIGRATION_004_REVISION_CASCADE_FIX,
     MIGRATION_005_SNAPSHOT_THREAD_IDS,
     MIGRATION_006_COMPACTION_STATE,
+    MIGRATION_007_ENTRY_TYPE,
 ]
 
 

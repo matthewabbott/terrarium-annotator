@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal
 
 from terrarium_annotator.storage.exceptions import DuplicateTermError
+from terrarium_annotator.storage.glossary import EntryType
 from terrarium_annotator.tools.xml_formatter import (
     format_error,
     format_glossary_entry,
@@ -34,6 +35,7 @@ class GlossaryTools:
         *,
         tags: list[str] | None = None,
         status: Literal["confirmed", "tentative", "all"] = "all",
+        entry_type: EntryType | Literal["all"] = "all",
         limit: int = 10,
     ) -> str:
         """Execute glossary search, return XML result."""
@@ -41,6 +43,7 @@ class GlossaryTools:
             query,
             tags=tags,
             status=status,
+            entry_type=entry_type,
             limit=limit,
         )
         return format_search_results(entries, query)
@@ -52,10 +55,11 @@ class GlossaryTools:
         tags: list[str],
         *,
         status: str = "tentative",
+        entry_type: EntryType = "glossary",
         post_id: int,
         thread_id: int,
     ) -> str:
-        """Create glossary entry, log creation, return XML result."""
+        """Create glossary/codex entry, log creation, return XML result."""
         try:
             entry_id = self._glossary.create(
                 term=term,
@@ -64,6 +68,7 @@ class GlossaryTools:
                 post_id=post_id,
                 thread_id=thread_id,
                 status=status,
+                entry_type=entry_type,
             )
             # Log creation to revision history
             self._revisions.log_creation(
@@ -74,7 +79,8 @@ class GlossaryTools:
                 status=status,
                 source_post_id=post_id,
             )
-            return format_success(f"Created entry '{term}'", entry_id=entry_id)
+            type_label = "codex" if entry_type == "codex" else "glossary"
+            return format_success(f"Created {type_label} entry '{term}'", entry_id=entry_id)
         except DuplicateTermError as e:
             return format_error(
                 f"Term '{term}' already exists (id={e.existing_id})",

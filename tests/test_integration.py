@@ -342,10 +342,10 @@ class TestCompaction:
         compactor, counter = compactor_setup
 
         # Verify threshold calculations
-        # With 2000 budget: soft=1200 (60%), thread_compact=1600 (80%), emergency=1800 (90%)
+        # With 2000 budget: soft=1200 (60%), thread_compact=1600 (80%), emergency=1700 (85%)
         assert compactor.soft_threshold == 1200
         assert compactor.thread_compact_threshold == 1600
-        assert compactor.emergency_threshold == 1800
+        assert compactor.emergency_threshold == 1700  # 85% (was 90% in F5.1)
         assert compactor.target == 1400  # 70%
 
         # Create state with multiple threads to summarize

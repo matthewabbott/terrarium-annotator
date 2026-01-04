@@ -124,6 +124,132 @@ GLOSSARY_DELETE_SCHEMA: dict = {
     },
 }
 
+# Codex tool schemas (wiki entries for named entities)
+CODEX_SEARCH_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "codex_search",
+        "description": "Search the codex for wiki entries (characters, locations, organizations, artifacts).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Full-text search query for codex entries",
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Filter by tags (all must match)",
+                },
+                "status": {
+                    "type": "string",
+                    "enum": ["confirmed", "tentative", "all"],
+                    "description": "Filter by status (default: all)",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum results to return (default: 10)",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+}
+
+CODEX_CREATE_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "codex_create",
+        "description": (
+            "Create a new codex entry for a named entity deserving a wiki page "
+            "(character, location, organization, artifact, major event)."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "term": {
+                    "type": "string",
+                    "description": "The entity name",
+                },
+                "definition": {
+                    "type": "string",
+                    "description": "Description of the entity",
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Tags: character, location, faction, item, artifact, event",
+                },
+                "status": {
+                    "type": "string",
+                    "enum": ["tentative", "confirmed"],
+                    "description": "Entry status (default: tentative)",
+                },
+            },
+            "required": ["term", "definition", "tags"],
+        },
+    },
+}
+
+CODEX_UPDATE_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "codex_update",
+        "description": "Update an existing codex entry.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "entry_id": {
+                    "type": "integer",
+                    "description": "ID of the entry to update",
+                },
+                "term": {
+                    "type": "string",
+                    "description": "New entity name (optional)",
+                },
+                "definition": {
+                    "type": "string",
+                    "description": "New description (optional)",
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "New tags (optional)",
+                },
+                "status": {
+                    "type": "string",
+                    "enum": ["tentative", "confirmed"],
+                    "description": "New status (optional)",
+                },
+            },
+            "required": ["entry_id"],
+        },
+    },
+}
+
+CODEX_DELETE_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "codex_delete",
+        "description": "Delete a codex entry.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "entry_id": {
+                    "type": "integer",
+                    "description": "ID of the entry to delete",
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Reason for deletion (for audit trail)",
+                },
+            },
+            "required": ["entry_id", "reason"],
+        },
+    },
+}
+
 CORPUS_READ_POST_SCHEMA: dict = {
     "type": "function",
     "function": {
@@ -172,14 +298,33 @@ CORPUS_READ_THREAD_RANGE_SCHEMA: dict = {
     },
 }
 
-# All tool schemas
-ALL_TOOL_SCHEMAS: list[dict] = [
+# Glossary-only tool schemas
+GLOSSARY_TOOL_SCHEMAS: list[dict] = [
     GLOSSARY_SEARCH_SCHEMA,
     GLOSSARY_CREATE_SCHEMA,
     GLOSSARY_UPDATE_SCHEMA,
     GLOSSARY_DELETE_SCHEMA,
+]
+
+# Codex-only tool schemas
+CODEX_TOOL_SCHEMAS: list[dict] = [
+    CODEX_SEARCH_SCHEMA,
+    CODEX_CREATE_SCHEMA,
+    CODEX_UPDATE_SCHEMA,
+    CODEX_DELETE_SCHEMA,
+]
+
+# Corpus reading tools
+CORPUS_TOOL_SCHEMAS: list[dict] = [
     CORPUS_READ_POST_SCHEMA,
     CORPUS_READ_THREAD_RANGE_SCHEMA,
+]
+
+# All tool schemas (both glossary and codex)
+ALL_TOOL_SCHEMAS: list[dict] = [
+    *GLOSSARY_TOOL_SCHEMAS,
+    *CODEX_TOOL_SCHEMAS,
+    *CORPUS_TOOL_SCHEMAS,
 ]
 
 # Snapshot tool schemas (F7)
@@ -269,29 +414,59 @@ SNAPSHOT_TOOL_SCHEMAS: list[dict] = [
 ]
 
 
-def get_all_tool_schemas(include_snapshot_tools: bool = False) -> list[dict]:
-    """Return all tool schemas in OpenAI function calling format.
+SweepMode = str  # "glossary" | "codex" | "both"
+
+
+def get_all_tool_schemas(
+    include_snapshot_tools: bool = False,
+    sweep_mode: SweepMode = "both",
+) -> list[dict]:
+    """Return tool schemas in OpenAI function calling format.
 
     Args:
         include_snapshot_tools: Include snapshot tools (F7).
+        sweep_mode: Which tools to include:
+            - "glossary": Only glossary tools (jargon/vocabulary)
+            - "codex": Only codex tools (wiki entries)
+            - "both": Both glossary and codex tools (default)
 
     Returns:
         List of tool definitions, each with 'type': 'function' and 'function'
         containing 'name', 'description', and 'parameters'.
 
     Available tools:
+        Glossary tools (jargon/vocabulary):
         - glossary_search: Search glossary by query, tags, status
         - glossary_create: Create new glossary entry
         - glossary_update: Update existing entry
         - glossary_delete: Delete entry with reason
+
+        Codex tools (wiki entries):
+        - codex_search: Search codex by query, tags, status
+        - codex_create: Create new codex entry
+        - codex_update: Update existing entry
+        - codex_delete: Delete entry with reason
+
+        Corpus tools (always included):
         - read_post: Read single post by ID
         - read_thread_range: Read posts in thread range
-        - list_snapshots: List recent snapshots (F7)
-        - summon_snapshot: Summon historical snapshot (F7)
-        - summon_continue: Continue summon conversation (F7)
-        - summon_dismiss: Dismiss active summon (F7)
+
+        Snapshot tools (F7, optional):
+        - list_snapshots: List recent snapshots
+        - summon_snapshot: Summon historical snapshot
+        - summon_continue: Continue summon conversation
+        - summon_dismiss: Dismiss active summon
     """
-    schemas = list(ALL_TOOL_SCHEMAS)
+    schemas: list[dict] = []
+
+    if sweep_mode in ("glossary", "both"):
+        schemas.extend(GLOSSARY_TOOL_SCHEMAS)
+    if sweep_mode in ("codex", "both"):
+        schemas.extend(CODEX_TOOL_SCHEMAS)
+
+    schemas.extend(CORPUS_TOOL_SCHEMAS)
+
     if include_snapshot_tools:
         schemas.extend(SNAPSHOT_TOOL_SCHEMAS)
+
     return schemas

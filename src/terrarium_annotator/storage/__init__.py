@@ -10,6 +10,7 @@ from terrarium_annotator.storage.exceptions import (
     StorageError,
 )
 from terrarium_annotator.storage.glossary import (
+    EntryType,
     GlossaryEntry,
     GlossaryStore,
     normalize_term,
@@ -36,6 +37,7 @@ __all__ = [
     "SnapshotNotFoundError",
     "StorageError",
     # Glossary
+    "EntryType",
     "GlossaryEntry",
     "GlossaryStore",
     "normalize_term",

@@ -223,7 +223,7 @@ class TestToolSchemas:
     def test_get_all_tool_schemas_returns_list(self):
         schemas = get_all_tool_schemas()
         assert isinstance(schemas, list)
-        assert len(schemas) == 6  # 4 glossary + 2 corpus
+        assert len(schemas) == 10  # 4 glossary + 4 codex + 2 corpus
 
     def test_all_schemas_have_required_structure(self):
         schemas = get_all_tool_schemas()
@@ -243,25 +243,46 @@ class TestToolSchemas:
             "glossary_create",
             "glossary_update",
             "glossary_delete",
+            "codex_search",
+            "codex_create",
+            "codex_update",
+            "codex_delete",
             "read_post",
             "read_thread_range",
         }
         assert names == expected
 
     def test_include_snapshot_tools_false(self):
-        # Snapshot tools not yet implemented
         schemas = get_all_tool_schemas(include_snapshot_tools=False)
-        assert len(schemas) == 6
+        assert len(schemas) == 10  # 4 glossary + 4 codex + 2 corpus
 
     def test_include_snapshot_tools_true_adds_four_tools(self):
         # F7 adds 4 snapshot tools: list_snapshots, summon_snapshot, summon_continue, summon_dismiss
         schemas = get_all_tool_schemas(include_snapshot_tools=True)
-        assert len(schemas) == 10  # 6 base + 4 snapshot tools
+        assert len(schemas) == 14  # 10 base + 4 snapshot tools
         tool_names = {s["function"]["name"] for s in schemas}
         assert "list_snapshots" in tool_names
         assert "summon_snapshot" in tool_names
         assert "summon_continue" in tool_names
         assert "summon_dismiss" in tool_names
+
+    def test_sweep_mode_glossary_only(self):
+        schemas = get_all_tool_schemas(sweep_mode="glossary")
+        names = {s["function"]["name"] for s in schemas}
+        assert "glossary_search" in names
+        assert "glossary_create" in names
+        assert "codex_search" not in names
+        assert "codex_create" not in names
+        assert "read_post" in names  # Corpus tools always included
+
+    def test_sweep_mode_codex_only(self):
+        schemas = get_all_tool_schemas(sweep_mode="codex")
+        names = {s["function"]["name"] for s in schemas}
+        assert "codex_search" in names
+        assert "codex_create" in names
+        assert "glossary_search" not in names
+        assert "glossary_create" not in names
+        assert "read_post" in names  # Corpus tools always included
 
 
 class TestToolDispatcher:
@@ -472,9 +493,10 @@ class TestToolDispatcher:
 
     def test_get_tool_definitions(self, dispatcher: ToolDispatcher):
         definitions = dispatcher.get_tool_definitions()
-        assert len(definitions) == 6
+        assert len(definitions) == 10  # 4 glossary + 4 codex + 2 corpus
         names = {d["function"]["name"] for d in definitions}
         assert "glossary_search" in names
+        assert "codex_search" in names
         assert "read_post" in names
 
     def test_has_active_summon_returns_false(self, dispatcher: ToolDispatcher):

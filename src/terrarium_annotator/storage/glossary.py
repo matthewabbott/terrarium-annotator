@@ -16,6 +16,9 @@ from terrarium_annotator.storage.exceptions import (
 from terrarium_annotator.storage.migrations import get_all_migrations
 
 
+EntryType = Literal["glossary", "codex"]
+
+
 @dataclass
 class GlossaryEntry:
     """A glossary entry with all metadata."""
@@ -32,6 +35,7 @@ class GlossaryEntry:
     last_updated_thread_id: int
     created_at: str
     updated_at: str
+    entry_type: EntryType = "glossary"
 
 
 def normalize_term(term: str) -> str:
@@ -62,6 +66,7 @@ class GlossaryStore:
         *,
         tags: list[str] | None = None,
         status: Literal["confirmed", "tentative", "all"] = "all",
+        entry_type: EntryType | Literal["all"] = "all",
         limit: int = 10,
     ) -> list[GlossaryEntry]:
         """
@@ -80,7 +85,7 @@ class GlossaryStore:
                 SELECT e.id, e.term, e.term_normalized, e.definition, e.status,
                        e.first_seen_post_id, e.first_seen_thread_id,
                        e.last_updated_post_id, e.last_updated_thread_id,
-                       e.created_at, e.updated_at,
+                       e.created_at, e.updated_at, e.entry_type,
                        bm25(glossary_fts) as rank
                 FROM glossary_fts f
                 JOIN glossary_entry e ON f.rowid = e.id
@@ -91,6 +96,10 @@ class GlossaryStore:
             if status != "all":
                 sql += " AND e.status = ?"
                 params.append(status)
+
+            if entry_type != "all":
+                sql += " AND e.entry_type = ?"
+                params.append(entry_type)
 
             if tags:
                 # Entries must have ALL specified tags
@@ -128,6 +137,7 @@ class GlossaryStore:
                         last_updated_thread_id=row["last_updated_thread_id"],
                         created_at=row["created_at"],
                         updated_at=row["updated_at"],
+                        entry_type=row["entry_type"],
                     )
                 )
             return entries
@@ -143,7 +153,7 @@ class GlossaryStore:
                 SELECT id, term, term_normalized, definition, status,
                        first_seen_post_id, first_seen_thread_id,
                        last_updated_post_id, last_updated_thread_id,
-                       created_at, updated_at
+                       created_at, updated_at, entry_type
                 FROM glossary_entry
                 WHERE id = ?
                 """,
@@ -166,6 +176,7 @@ class GlossaryStore:
                 last_updated_thread_id=row["last_updated_thread_id"],
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
+                entry_type=row["entry_type"],
             )
         except sqlite3.Error as e:
             raise DatabaseError(f"Get entry {entry_id} failed: {e}") from e
@@ -179,6 +190,7 @@ class GlossaryStore:
         post_id: int,
         thread_id: int,
         status: str = "tentative",
+        entry_type: EntryType = "glossary",
     ) -> int:
         """
         Insert new entry.
@@ -206,8 +218,8 @@ class GlossaryStore:
                         term, term_normalized, definition, status,
                         first_seen_post_id, first_seen_thread_id,
                         last_updated_post_id, last_updated_thread_id,
-                        created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        created_at, updated_at, entry_type
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         term,
@@ -220,6 +232,7 @@ class GlossaryStore:
                         thread_id,
                         now,
                         now,
+                        entry_type,
                     ),
                 )
                 entry_id = cursor.lastrowid
@@ -334,19 +347,25 @@ class GlossaryStore:
         except sqlite3.Error as e:
             raise DatabaseError(f"Delete entry {entry_id} failed: {e}") from e
 
-    def all_entries(self) -> Iterator[GlossaryEntry]:
+    def all_entries(
+        self, entry_type: EntryType | Literal["all"] = "all"
+    ) -> Iterator[GlossaryEntry]:
         """Yield all entries. Use for export operations."""
         try:
-            cursor = self.conn.execute(
-                """
+            sql = """
                 SELECT id, term, term_normalized, definition, status,
                        first_seen_post_id, first_seen_thread_id,
                        last_updated_post_id, last_updated_thread_id,
-                       created_at, updated_at
+                       created_at, updated_at, entry_type
                 FROM glossary_entry
-                ORDER BY term_normalized
-                """
-            )
+            """
+            params: list[str] = []
+            if entry_type != "all":
+                sql += " WHERE entry_type = ?"
+                params.append(entry_type)
+            sql += " ORDER BY term_normalized"
+
+            cursor = self.conn.execute(sql, params)
             for row in cursor:
                 yield GlossaryEntry(
                     id=row["id"],
@@ -361,6 +380,7 @@ class GlossaryStore:
                     last_updated_thread_id=row["last_updated_thread_id"],
                     created_at=row["created_at"],
                     updated_at=row["updated_at"],
+                    entry_type=row["entry_type"],
                 )
         except sqlite3.Error as e:
             raise DatabaseError(f"all_entries failed: {e}") from e
@@ -401,7 +421,7 @@ class GlossaryStore:
                 SELECT id, term, term_normalized, definition, status,
                        first_seen_post_id, first_seen_thread_id,
                        last_updated_post_id, last_updated_thread_id,
-                       created_at, updated_at
+                       created_at, updated_at, entry_type
                 FROM glossary_entry
                 WHERE {field} = ?
                 ORDER BY term_normalized
@@ -424,6 +444,7 @@ class GlossaryStore:
                         last_updated_thread_id=row["last_updated_thread_id"],
                         created_at=row["created_at"],
                         updated_at=row["updated_at"],
+                        entry_type=row["entry_type"],
                     )
                 )
             return entries
@@ -446,7 +467,7 @@ class GlossaryStore:
                 SELECT id, term, term_normalized, definition, status,
                        first_seen_post_id, first_seen_thread_id,
                        last_updated_post_id, last_updated_thread_id,
-                       created_at, updated_at
+                       created_at, updated_at, entry_type
                 FROM glossary_entry
                 WHERE first_seen_thread_id = ? AND status = 'tentative'
                 ORDER BY term_normalized
@@ -469,6 +490,7 @@ class GlossaryStore:
                         last_updated_thread_id=row["last_updated_thread_id"],
                         created_at=row["created_at"],
                         updated_at=row["updated_at"],
+                        entry_type=row["entry_type"],
                     )
                 )
             return entries

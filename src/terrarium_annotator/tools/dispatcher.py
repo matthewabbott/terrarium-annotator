@@ -52,10 +52,17 @@ class ToolDispatcher:
 
         # Tool name -> (handler method, requires_post_context)
         self._handlers: dict[str, tuple[Callable[..., str], bool]] = {
-            "glossary_search": (self._handle_search, False),
-            "glossary_create": (self._handle_create, True),
+            # Glossary tools (jargon/vocabulary)
+            "glossary_search": (self._handle_glossary_search, False),
+            "glossary_create": (self._handle_glossary_create, True),
             "glossary_update": (self._handle_update, True),
             "glossary_delete": (self._handle_delete, True),
+            # Codex tools (wiki entries)
+            "codex_search": (self._handle_codex_search, False),
+            "codex_create": (self._handle_codex_create, True),
+            "codex_update": (self._handle_update, True),  # Same as glossary
+            "codex_delete": (self._handle_delete, True),  # Same as glossary
+            # Corpus tools
             "read_post": (self._handle_read_post, False),
             "read_thread_range": (self._handle_read_range, False),
         }
@@ -70,7 +77,10 @@ class ToolDispatcher:
             })
 
     # Write tools that should be blocked during summon
-    _WRITE_TOOLS = {"glossary_create", "glossary_update", "glossary_delete"}
+    _WRITE_TOOLS = {
+        "glossary_create", "glossary_update", "glossary_delete",
+        "codex_create", "codex_update", "codex_delete",
+    }
 
     def dispatch(
         self,
@@ -178,10 +188,18 @@ class ToolDispatcher:
                 error=str(e),
             )
 
-    def get_tool_definitions(self) -> list[dict]:
-        """Return OpenAI function calling schemas."""
+    def get_tool_definitions(self, sweep_mode: str = "both") -> list[dict]:
+        """Return OpenAI function calling schemas.
+
+        Args:
+            sweep_mode: Which tools to include:
+                - "glossary": Only glossary tools
+                - "codex": Only codex tools
+                - "both": Both glossary and codex tools (default)
+        """
         return get_all_tool_schemas(
-            include_snapshot_tools=self._snapshots is not None
+            include_snapshot_tools=self._snapshots is not None,
+            sweep_mode=sweep_mode,
         )
 
     @property
@@ -199,22 +217,46 @@ class ToolDispatcher:
 
     # Handler methods
 
-    def _handle_search(self, args: dict) -> str:
+    def _handle_glossary_search(self, args: dict) -> str:
         """Handle glossary_search tool call."""
         return self._glossary_tools.search(
             args["query"],
             tags=args.get("tags"),
             status=args.get("status", "all"),
+            entry_type="glossary",
             limit=args.get("limit", 10),
         )
 
-    def _handle_create(self, args: dict, post_id: int, thread_id: int) -> str:
+    def _handle_codex_search(self, args: dict) -> str:
+        """Handle codex_search tool call."""
+        return self._glossary_tools.search(
+            args["query"],
+            tags=args.get("tags"),
+            status=args.get("status", "all"),
+            entry_type="codex",
+            limit=args.get("limit", 10),
+        )
+
+    def _handle_glossary_create(self, args: dict, post_id: int, thread_id: int) -> str:
         """Handle glossary_create tool call."""
         return self._glossary_tools.create(
             term=args["term"],
             definition=args["definition"],
             tags=args.get("tags", []),
             status=args.get("status", "tentative"),
+            entry_type="glossary",
+            post_id=post_id,
+            thread_id=thread_id,
+        )
+
+    def _handle_codex_create(self, args: dict, post_id: int, thread_id: int) -> str:
+        """Handle codex_create tool call."""
+        return self._glossary_tools.create(
+            term=args["term"],
+            definition=args["definition"],
+            tags=args.get("tags", []),
+            status=args.get("status", "tentative"),
+            entry_type="codex",
             post_id=post_id,
             thread_id=thread_id,
         )
