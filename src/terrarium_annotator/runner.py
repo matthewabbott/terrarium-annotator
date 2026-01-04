@@ -20,6 +20,7 @@ from terrarium_annotator.context import (
     get_system_prompt,
 )
 from terrarium_annotator.corpus import CorpusReader, SceneBatcher
+from terrarium_annotator.detection import NovelTermDetector, format_detected_terms_xml
 from terrarium_annotator.curator import CuratorFork
 from terrarium_annotator.storage import (
     GlossaryStore,
@@ -190,6 +191,9 @@ class AnnotationRunner:
             revisions=self.revisions,
             agent=self.agent,
         )
+
+        # Detection (F10)
+        self.detector = NovelTermDetector(glossary=self.glossary)
 
         # Graceful shutdown support
         self._shutdown_requested = False
@@ -362,10 +366,23 @@ class AnnotationRunner:
             # Search for relevant glossary entries
             relevant_entries = self._search_relevant_entries(scene)
 
+            # Detect novel terms in scene text (F10)
+            scene_text = " ".join(post.body or "" for post in scene.posts)
+            detected = self.detector.detect(scene_text)
+            detected_terms_xml = format_detected_terms_xml(detected)
+            if not detected.is_empty():
+                LOGGER.debug(
+                    "Detected terms: %d novel, %d semantic, %d existing",
+                    len(detected.novel),
+                    len(detected.capitalized_common),
+                    len(detected.existing_glossary),
+                )
+
             # Build messages with compaction state (F5)
             messages = self.context.build_messages(
                 current_scene=scene,
                 relevant_entries=relevant_entries,
+                detected_terms_xml=detected_terms_xml or None,
                 cumulative_summary=self.compaction_state.cumulative_summary or None,
                 thread_summaries=self.compaction_state.thread_summaries or None,
                 chunk_summaries=self.compaction_state.chunk_summaries or None,

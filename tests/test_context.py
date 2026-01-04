@@ -320,6 +320,41 @@ class TestAnnotationContext:
         assert messages[1]["role"] == "user"
         assert messages[1]["content"] == "Previous message"
 
+    def test_build_messages_includes_detected_terms(self, sample_scene):
+        """Should include detected_terms_xml in user payload."""
+        ctx = NewAnnotationContext(system_prompt="Annotate.")
+        detected_xml = "<detected_terms><novel>Vys, Zaahir</novel></detected_terms>"
+
+        messages = ctx.build_messages(
+            current_scene=sample_scene,
+            detected_terms_xml=detected_xml,
+        )
+
+        user_msg = messages[-1]["content"]
+        assert "<detected_terms>" in user_msg
+        assert "<novel>Vys, Zaahir</novel>" in user_msg
+
+    def test_build_messages_detected_terms_before_known_glossary(
+        self, sample_scene, sample_entry
+    ):
+        """Detected terms should appear between story_passages and known_glossary."""
+        ctx = NewAnnotationContext(system_prompt="Annotate.")
+        detected_xml = "<detected_terms><novel>Rhynia</novel></detected_terms>"
+
+        messages = ctx.build_messages(
+            current_scene=sample_scene,
+            relevant_entries=[sample_entry],
+            detected_terms_xml=detected_xml,
+        )
+
+        user_msg = messages[-1]["content"]
+        # Verify ordering
+        story_pos = user_msg.find("</story_passages>")
+        detected_pos = user_msg.find("<detected_terms>")
+        glossary_pos = user_msg.find("<known_glossary>")
+
+        assert story_pos < detected_pos < glossary_pos
+
 
 class TestSystemPrompt:
     """Test SYSTEM_PROMPT constant."""

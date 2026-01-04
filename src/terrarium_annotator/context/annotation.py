@@ -27,6 +27,7 @@ class AnnotationContext:
         chunk_summaries: list[ChunkSummary] | None = None,
         current_scene: Scene | None = None,
         relevant_entries: list[GlossaryEntry] | None = None,
+        detected_terms_xml: str | None = None,
         tools: list[dict] | None = None,
     ) -> list[dict]:
         """Build OpenAI-compatible message list for annotation request.
@@ -45,6 +46,7 @@ class AnnotationContext:
             chunk_summaries: Summaries of old scene chunks in current thread.
             current_scene: Scene being annotated.
             relevant_entries: Glossary entries to include for context.
+            detected_terms_xml: XML block with detected novel/semantic terms.
             tools: Tool definitions (currently unused, for future tool_choice).
 
         Returns:
@@ -85,11 +87,12 @@ class AnnotationContext:
         # Add full conversation history (compaction manages size)
         messages.extend(self.conversation_history)
 
-        # Build and add user payload with scene + entries
+        # Build and add user payload with scene + entries + detected terms
         if current_scene is not None:
             user_content = self._format_user_payload(
                 current_scene,
                 relevant_entries or [],
+                detected_terms_xml=detected_terms_xml,
             )
             messages.append({"role": "user", "content": user_content})
 
@@ -212,8 +215,9 @@ class AnnotationContext:
         self,
         scene: Scene,
         entries: list[GlossaryEntry],
+        detected_terms_xml: str | None = None,
     ) -> str:
-        """Format scene posts and glossary entries for user message."""
+        """Format scene posts, detected terms, and glossary entries for user message."""
         lines: list[str] = ["<story_passages>"]
 
         for post in scene.posts:
@@ -227,6 +231,11 @@ class AnnotationContext:
             lines.append(f"<post {attr}>{body}</post>")
 
         lines.append("</story_passages>")
+
+        # Add detected terms section (novel words, semantic jargon candidates)
+        if detected_terms_xml:
+            lines.append("")
+            lines.append(detected_terms_xml)
 
         if entries:
             lines.append("<known_glossary>")

@@ -231,6 +231,15 @@ class TestAnnotationRunner:
         # Verify batcher was called with start_after_post_id=None
         runner.batcher.iter_scenes.assert_called_once_with(start_after_post_id=None)
 
+    def test_init_creates_detector(self, mock_components):
+        """Runner initializes NovelTermDetector for F10 detection."""
+        with patch("terrarium_annotator.runner.NovelTermDetector") as mock_detector:
+            runner = AnnotationRunner(mock_components["config"])
+
+            # Verify detector was created with glossary
+            mock_detector.assert_called_once_with(glossary=runner.glossary)
+            assert hasattr(runner, "detector")
+
 
 class TestToolLoop:
     """Tests for _run_tool_loop method."""
