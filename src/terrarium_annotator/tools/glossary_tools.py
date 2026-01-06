@@ -58,8 +58,20 @@ class GlossaryTools:
         entry_type: EntryType = "glossary",
         post_id: int,
         thread_id: int,
+        snapshot_id: int | None = None,
     ) -> str:
-        """Create glossary/codex entry, log creation, return XML result."""
+        """Create glossary/codex entry, log creation, return XML result.
+
+        Args:
+            term: Entry term.
+            definition: Entry definition.
+            tags: Entry tags.
+            status: Entry status (default: tentative).
+            entry_type: "glossary" or "codex".
+            post_id: Source post ID.
+            thread_id: Source thread ID.
+            snapshot_id: Snapshot ID for revision linkage (F11).
+        """
         try:
             entry_id = self._glossary.create(
                 term=term,
@@ -70,7 +82,7 @@ class GlossaryTools:
                 status=status,
                 entry_type=entry_type,
             )
-            # Log creation to revision history
+            # Log creation to revision history with snapshot linkage
             self._revisions.log_creation(
                 entry_id=entry_id,
                 term=term,
@@ -78,6 +90,7 @@ class GlossaryTools:
                 tags=tags,
                 status=status,
                 source_post_id=post_id,
+                snapshot_id=snapshot_id,
             )
             type_label = "codex" if entry_type == "codex" else "glossary"
             return format_success(f"Created {type_label} entry '{term}'", entry_id=entry_id)
@@ -97,14 +110,26 @@ class GlossaryTools:
         status: str | None = None,
         post_id: int,
         thread_id: int,
+        snapshot_id: int | None = None,
     ) -> str:
-        """Update glossary entry, log changes, return XML result."""
+        """Update glossary entry, log changes, return XML result.
+
+        Args:
+            entry_id: Entry ID to update.
+            term: New term (optional).
+            definition: New definition (optional).
+            tags: New tags (optional).
+            status: New status (optional).
+            post_id: Source post ID.
+            thread_id: Source thread ID.
+            snapshot_id: Snapshot ID for revision linkage (F11).
+        """
         # Get existing entry for diff
         existing = self._glossary.get(entry_id)
         if existing is None:
             return format_error(f"Entry {entry_id} not found", code="NOT_FOUND")
 
-        # Log each changed field
+        # Log each changed field with snapshot linkage
         if term is not None and term != existing.term:
             self._revisions.log_change(
                 entry_id,
@@ -112,6 +137,7 @@ class GlossaryTools:
                 existing.term,
                 term,
                 source_post_id=post_id,
+                snapshot_id=snapshot_id,
             )
         if definition is not None and definition != existing.definition:
             self._revisions.log_change(
@@ -120,6 +146,7 @@ class GlossaryTools:
                 existing.definition,
                 definition,
                 source_post_id=post_id,
+                snapshot_id=snapshot_id,
             )
         if tags is not None and tags != existing.tags:
             self._revisions.log_change(
@@ -128,6 +155,7 @@ class GlossaryTools:
                 ",".join(existing.tags),
                 ",".join(tags),
                 source_post_id=post_id,
+                snapshot_id=snapshot_id,
             )
         if status is not None and status != existing.status:
             self._revisions.log_change(
@@ -136,6 +164,7 @@ class GlossaryTools:
                 existing.status,
                 status,
                 source_post_id=post_id,
+                snapshot_id=snapshot_id,
             )
 
         # Perform update
@@ -163,17 +192,26 @@ class GlossaryTools:
         reason: str,
         *,
         post_id: int,
+        snapshot_id: int | None = None,
     ) -> str:
-        """Delete glossary entry, log deletion, return XML result."""
+        """Delete glossary entry, log deletion, return XML result.
+
+        Args:
+            entry_id: Entry ID to delete.
+            reason: Reason for deletion.
+            post_id: Source post ID.
+            snapshot_id: Snapshot ID for revision linkage (F11).
+        """
         existing = self._glossary.get(entry_id)
         if existing is None:
             return format_error(f"Entry {entry_id} not found", code="NOT_FOUND")
 
-        # Log deletion before removing
+        # Log deletion before removing with snapshot linkage
         self._revisions.log_deletion(
             entry_id,
             reason,
             source_post_id=post_id,
+            snapshot_id=snapshot_id,
         )
 
         deleted = self._glossary.delete(entry_id, reason)

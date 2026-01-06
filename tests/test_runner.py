@@ -131,6 +131,7 @@ class TestAnnotationRunner:
             config = RunnerConfig(
                 corpus_db_path=tmp_path / "corpus.db",
                 annotator_db_path=tmp_path / "annotator.db",
+                thread_mode=False,  # Tests below use scene mode
             )
 
             yield {
@@ -266,6 +267,7 @@ class TestToolLoop:
                 corpus_db_path=tmp_path / "corpus.db",
                 annotator_db_path=tmp_path / "annotator.db",
                 max_tool_rounds=5,
+                thread_mode=False,  # Tests below use scene mode
             )
 
             runner = AnnotationRunner(config)

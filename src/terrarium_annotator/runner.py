@@ -19,7 +19,7 @@ from terrarium_annotator.context import (
     TokenCounter,
     get_system_prompt,
 )
-from terrarium_annotator.corpus import CorpusReader, SceneBatcher
+from terrarium_annotator.corpus import CorpusReader, SceneBatcher, ThreadIterator
 from terrarium_annotator.detection import NovelTermDetector, format_detected_terms_xml
 from terrarium_annotator.curator import CuratorFork
 from terrarium_annotator.storage import (
@@ -31,7 +31,7 @@ from terrarium_annotator.storage import (
 from terrarium_annotator.tools import ToolDispatcher
 
 if TYPE_CHECKING:
-    from terrarium_annotator.corpus import Scene
+    from terrarium_annotator.corpus import Scene, ThreadContent
     from terrarium_annotator.storage import GlossaryEntry, RunState
 
 LOGGER = logging.getLogger(__name__)
@@ -51,9 +51,12 @@ class RunnerConfig:
     max_tool_rounds: int = 10
     # Context settings
     # Compaction settings (F5)
-    context_budget: int = 98304  # ~98K tokens for long-context annotation
-    thread_compact_ratio: float = 0.80  # Summarize thread at thread boundary
-    emergency_ratio: float = 0.90  # Emergency compact mid-scene
+    # Budget increased to 110K for F11 thread mode (stays under 2^17 for vLLM KV cache)
+    context_budget: int = 112640  # ~110K tokens for long-context annotation
+    # F11 Thread mode thresholds (raised since history resets between threads)
+    thread_compact_ratio: float = 0.90  # Rolling compaction at 90% (was 80%)
+    emergency_ratio: float = 0.95  # Emergency compaction at 95% (was 85%)
+    nuclear_ratio: float = 0.98  # Nuclear compaction at 98% (was 95%)
     target_ratio: float = 0.70
     # Curator settings (F6)
     enable_curator: bool = True
@@ -63,6 +66,8 @@ class RunnerConfig:
     from_snapshot_id: int | None = None
     # Sweep mode (F10): "glossary", "codex", or "both"
     sweep_mode: str = "both"
+    # Thread mode (F11): process entire threads at once vs scene-by-scene
+    thread_mode: bool = True
 
 
 @dataclass
@@ -81,7 +86,7 @@ class ToolStats:
 class RunResult:
     """Result of an annotation run."""
 
-    scenes_processed: int
+    scenes_processed: int  # or threads_processed in thread mode
     posts_processed: int
     entries_created: int
     entries_updated: int
@@ -89,10 +94,17 @@ class RunResult:
     tool_calls_total: int
     run_duration_seconds: float
     final_state: RunState = field(default=None)  # type: ignore[assignment]
+    thread_mode: bool = False
 
 
 class AnnotationRunner:
     """Iterates the corpus and drives the LLM-based annotator."""
+
+    # Tools that modify glossary/codex and should trigger snapshots (F11)
+    GLOSSARY_EDIT_TOOLS = {
+        "glossary_create", "glossary_update", "glossary_delete",
+        "codex_create", "codex_update", "codex_delete",
+    }
 
     def __init__(self, config: RunnerConfig) -> None:
         self.config = config
@@ -112,6 +124,8 @@ class AnnotationRunner:
         # Corpus components (F1)
         self.corpus = CorpusReader(config.corpus_db_path)
         self.batcher = SceneBatcher(self.corpus)
+        self.thread_iterator = ThreadIterator(self.corpus)
+        self._previous_thread_posts: list = []  # For thread mode context window
 
         # Context (F2) - may be restored from snapshot below
         self.context = AnnotationContext(
@@ -145,6 +159,7 @@ class AnnotationRunner:
             context_budget=config.context_budget,
             thread_compact_ratio=config.thread_compact_ratio,
             emergency_ratio=config.emergency_ratio,
+            nuclear_ratio=config.nuclear_ratio,
             target_ratio=config.target_ratio,
         )
         self.compaction_state = CompactionState()
@@ -257,11 +272,17 @@ class AnnotationRunner:
         Execute annotation loop.
 
         Args:
-            limit: Maximum scenes to process (None = all).
+            limit: Maximum scenes/threads to process (None = all).
 
         Returns:
             RunResult with stats and final state.
         """
+        if self.config.thread_mode:
+            return self._run_thread_mode(limit)
+        return self._run_scene_mode(limit)
+
+    def _run_scene_mode(self, limit: int | None = None) -> RunResult:
+        """Execute scene-by-scene annotation (legacy mode)."""
         start_time = time.time()
 
         # Install graceful shutdown handlers
@@ -500,7 +521,402 @@ class AnnotationRunner:
             tool_calls_total=total_tool_calls,
             run_duration_seconds=elapsed,
             final_state=final_state,
+            thread_mode=False,
         )
+
+    def _run_thread_mode(self, limit: int | None = None) -> RunResult:
+        """Execute thread-based annotation (F11).
+
+        Processes entire threads at once, accumulating conversation history
+        within each thread and resetting between threads.
+        """
+        start_time = time.time()
+
+        # Install graceful shutdown handlers
+        self._install_signal_handlers()
+
+        # Get checkpoint for resume
+        state = self.progress.get_state()
+        # F9: Prefer snapshot resume position if set
+        if self._resume_from_snapshot_post_id is not None:
+            start_after_thread_id = state.last_thread_id
+            start_after_post_id = self._resume_from_snapshot_post_id
+        elif self.config.resume:
+            start_after_thread_id = state.last_thread_id
+            start_after_post_id = state.last_post_id
+        else:
+            start_after_thread_id = None
+            start_after_post_id = None
+
+        LOGGER.info(
+            "Starting thread-mode annotation run (resume=%s, from_snapshot=%s, "
+            "start_after_thread=%s, start_after_post=%s)",
+            self.config.resume,
+            self.config.from_snapshot_id,
+            start_after_thread_id,
+            start_after_post_id,
+        )
+
+        # Mark run started
+        self.progress.start_run()
+
+        # Aggregate stats
+        threads_processed = 0
+        total_posts = 0
+        total_created = 0
+        total_updated = 0
+        total_deleted = 0
+        total_tool_calls = 0
+        total_inference_time = 0.0
+
+        # Thread iteration
+        for thread in self.thread_iterator.iter_threads(
+            start_after_thread_id=start_after_thread_id,
+            start_after_post_id=start_after_post_id,
+        ):
+            self._thread_position = thread.thread_position
+
+            LOGGER.info(
+                "Processing thread %d (position %d, %d QM posts, title: %s)",
+                thread.thread_id,
+                thread.thread_position,
+                thread.post_count,
+                (thread.thread_title or "")[:50],
+            )
+
+            thread_start_time = time.time()
+
+            # Reset conversation history for new thread
+            self.context.reset_for_new_thread()
+
+            # Search for relevant glossary entries
+            relevant_entries = self._search_relevant_entries_for_thread(thread)
+
+            # Detect novel terms across all thread text (F10)
+            thread_text = " ".join(post.body or "" for post in thread.qm_posts)
+            detected = self.detector.detect(thread_text)
+            detected_terms_xml = format_detected_terms_xml(detected)
+            if not detected.is_empty():
+                LOGGER.debug(
+                    "Detected terms: %d novel, %d semantic, %d existing",
+                    len(detected.novel),
+                    len(detected.capitalized_common),
+                    len(detected.existing_glossary),
+                )
+
+            # Build messages with thread content
+            messages = self.context.build_thread_messages(
+                current_thread=thread,
+                previous_thread_posts=self._previous_thread_posts or None,
+                cumulative_summary=self.compaction_state.cumulative_summary or None,
+                relevant_entries=relevant_entries,
+                detected_terms_xml=detected_terms_xml or None,
+            )
+
+            # Log context usage
+            tokens, usage_pct = self.compactor.get_current_usage(messages)
+            self.compactor.stats.record_usage(usage_pct)
+
+            LOGGER.info(
+                "Context: %d/%d tokens (%.1f%%) | thread %d",
+                tokens,
+                self.compactor.budget,
+                usage_pct,
+                thread.thread_id,
+            )
+
+            # Execute tool loop for this thread
+            try:
+                tool_stats = self._run_thread_tool_loop(messages, thread)
+            except AgentClientError as e:
+                LOGGER.error("Agent call failed, stopping run: %s", e)
+                break
+
+            # Update progress
+            self.progress.update(
+                last_post_id=thread.last_post_id or 0,
+                last_thread_id=thread.thread_id,
+                posts_processed_delta=thread.post_count,
+                entries_created_delta=tool_stats.created,
+                entries_updated_delta=tool_stats.updated,
+            )
+            self.progress.update_thread_state(thread.thread_id, status="completed")
+
+            # Track for cumulative summary
+            self.compaction_state.completed_thread_ids.append(thread.thread_id)
+
+            # Create thread summary for cumulative
+            if self.compaction_state.cumulative_summary:
+                # Merge new summary into cumulative (simplified for now)
+                # TODO: Use ThreadSummarizer for proper summarization
+                LOGGER.debug("Thread %d completed, updating cumulative summary", thread.thread_id)
+
+            # Run curator evaluation (F6)
+            if self.config.enable_curator:
+                try:
+                    curator_result = self.curator.run(thread.thread_id)
+                    if curator_result.entries_evaluated > 0:
+                        LOGGER.info(
+                            "Curator: %d evaluated, %d confirmed, %d rejected, %d merged, %d revised",
+                            curator_result.entries_evaluated,
+                            curator_result.confirmed,
+                            curator_result.rejected,
+                            curator_result.merged,
+                            curator_result.revised,
+                        )
+                except Exception as e:
+                    LOGGER.warning("Curator evaluation failed: %s", e)
+
+            # Create checkpoint snapshot (F7)
+            self._create_checkpoint(
+                thread_id=thread.thread_id,
+                last_post_id=thread.last_post_id or 0,
+            )
+
+            # Shift context window: current thread becomes previous
+            self._previous_thread_posts = list(thread.qm_posts)
+
+            # Aggregate stats
+            threads_processed += 1
+            total_posts += thread.post_count
+            total_created += tool_stats.created
+            total_updated += tool_stats.updated
+            total_deleted += tool_stats.deleted
+            total_tool_calls += tool_stats.tool_calls
+            total_inference_time += tool_stats.inference_time
+
+            # Calculate thread timing
+            thread_duration = time.time() - thread_start_time
+
+            # Fetch vLLM KV cache usage
+            metrics = self.agent.get_metrics()
+            kv_cache_pct = metrics.get("vllm_kv_cache_pct", 0.0) * 100
+
+            LOGGER.info(
+                "Thread complete: %.1fs (inference: %.1fs) | %d calls, +%d/~%d | KV: %.1f%%",
+                thread_duration,
+                tool_stats.inference_time,
+                tool_stats.tool_calls,
+                tool_stats.created,
+                tool_stats.updated,
+                kv_cache_pct,
+            )
+
+            # Check limit
+            if limit is not None and threads_processed >= limit:
+                LOGGER.info("Reached thread limit (%d)", limit)
+                break
+
+            # Check for graceful shutdown
+            if self._shutdown_requested:
+                LOGGER.info(
+                    "Shutdown: completed thread %d, exiting",
+                    thread.thread_id,
+                )
+                break
+
+        elapsed = time.time() - start_time
+        final_state = self.progress.get_state()
+
+        LOGGER.info(
+            "Run complete: %d threads, %d posts, %d entries created, %.1fs (inference: %.1fs, %.0f%%)",
+            threads_processed,
+            total_posts,
+            total_created,
+            elapsed,
+            total_inference_time,
+            (total_inference_time / elapsed * 100) if elapsed > 0 else 0,
+        )
+
+        # Log compaction summary
+        LOGGER.info("Compaction stats: %s", self.compactor.stats.summary())
+
+        # Restore original signal handlers
+        self._remove_signal_handlers()
+
+        return RunResult(
+            scenes_processed=threads_processed,  # Reusing field for threads
+            posts_processed=total_posts,
+            entries_created=total_created,
+            entries_updated=total_updated,
+            entries_deleted=total_deleted,
+            tool_calls_total=total_tool_calls,
+            run_duration_seconds=elapsed,
+            final_state=final_state,
+            thread_mode=True,
+        )
+
+    def _search_relevant_entries_for_thread(
+        self, thread: ThreadContent
+    ) -> list[GlossaryEntry]:
+        """Search glossary for entries relevant to the thread content."""
+        if not thread.qm_posts:
+            return []
+
+        # Combine thread text for search - extract key words from first few posts
+        thread_text = " ".join(
+            post.body or "" for post in thread.qm_posts[:5]
+        )
+        # Sanitize for FTS5: keep only alphanumeric and spaces
+        words = re.findall(r"\b[a-zA-Z]{3,}\b", thread_text)
+        query = " ".join(words[:20])
+
+        if not query.strip():
+            return []
+
+        try:
+            safe_query = query.replace('"', "")
+            return self.glossary.search(f'"{safe_query}"', limit=10)
+        except Exception as e:
+            LOGGER.warning("Glossary search failed: %s", e)
+            return []
+
+    def _run_thread_tool_loop(
+        self,
+        messages: list[dict],
+        thread: ThreadContent,
+    ) -> ToolStats:
+        """Execute agent with tool calling for a complete thread.
+
+        Unlike _run_tool_loop which processes scenes, this handles entire
+        threads. Conversation history accumulates within the thread.
+
+        Args:
+            messages: Initial message list for agent.
+            thread: Current thread being processed.
+
+        Returns:
+            ToolStats with counts of operations performed.
+        """
+        stats = ToolStats()
+        tools = self.dispatcher.get_tool_definitions(sweep_mode=self.config.sweep_mode)
+        current_messages = list(messages)
+        initial_len = len(messages)
+
+        for round_num in range(self.config.max_tool_rounds):
+            stats.rounds = round_num + 1
+
+            # Check compaction before agent call
+            if self.compactor.should_compact(current_messages):
+                current_messages, compact_result = self.compactor.compact(
+                    current_messages, self.compaction_state, self.context
+                )
+                LOGGER.info(
+                    "Compacted: %d -> %d tokens (tier: %.1f, target reached: %s%s)",
+                    compact_result.initial_tokens,
+                    compact_result.final_tokens,
+                    compact_result.highest_tier,
+                    compact_result.target_reached,
+                    ", NUCLEAR" if compact_result.history_dropped else "",
+                )
+
+            # Hard abort check
+            tokens, usage_pct = self.compactor.get_current_usage(current_messages)
+            if usage_pct > 100:
+                LOGGER.error(
+                    "FATAL: Context exceeds budget (%.1f%% = %d/%d tokens) "
+                    "even after all compaction. Thread %d.",
+                    usage_pct,
+                    tokens,
+                    self.compactor.budget,
+                    thread.thread_id,
+                )
+                raise RuntimeError(
+                    f"Context budget exceeded: {tokens}/{self.compactor.budget} tokens "
+                    f"({usage_pct:.1f}%). Increase budget or reduce thread size."
+                )
+
+            # Call agent
+            response = self.agent.chat(
+                messages=current_messages,
+                tools=tools,
+                temperature=self.config.temperature,
+                max_tokens=self.config.max_tokens,
+            )
+
+            stats.inference_time += response.inference_duration_seconds
+            LOGGER.debug(
+                "Inference: %.2fs (round %d)",
+                response.inference_duration_seconds,
+                round_num + 1,
+            )
+
+            message = response.message
+
+            # Check for tool calls
+            tool_calls = message.get("tool_calls", [])
+
+            if not tool_calls:
+                # No tool calls - agent is done
+                content = message.get("content", "")
+                if content:
+                    current_messages.append({"role": "assistant", "content": content})
+                LOGGER.debug("Thread tool loop complete after %d rounds", stats.rounds)
+                break
+
+            # Record assistant message with tool calls
+            assistant_content = message.get("content") or ""
+            assistant_turn = {
+                "role": "assistant",
+                "content": assistant_content,
+                "tool_calls": tool_calls,
+            }
+            current_messages.append(assistant_turn)
+
+            # Dispatch each tool call
+            for tool_call in tool_calls:
+                stats.tool_calls += 1
+
+                # Create snapshot before glossary edits for revision linkage (F11)
+                func = tool_call.get("function", {})
+                tool_name = func.get("name", "")
+                snapshot_id = None
+                if tool_name in self.GLOSSARY_EDIT_TOOLS:
+                    snapshot_id = self._create_glossary_edit_snapshot(
+                        thread.thread_id,
+                        thread.last_post_id or 0,
+                        tool_name,
+                    )
+
+                result = self.dispatcher.dispatch(
+                    tool_call,
+                    current_post_id=thread.last_post_id or 0,
+                    current_thread_id=thread.thread_id,
+                    snapshot_id=snapshot_id,
+                )
+
+                # Track glossary modifications
+                if result.success:
+                    if result.tool_name == "glossary_create":
+                        stats.created += 1
+                    elif result.tool_name == "glossary_update":
+                        stats.updated += 1
+                    elif result.tool_name == "glossary_delete":
+                        stats.deleted += 1
+
+                # Add tool result to messages
+                tool_message = {
+                    "role": "tool",
+                    "tool_call_id": result.call_id,
+                    "content": result.result,
+                }
+                current_messages.append(tool_message)
+
+        else:
+            # Exhausted max_tool_rounds
+            LOGGER.warning(
+                "Max tool rounds (%d) exceeded for thread %d",
+                self.config.max_tool_rounds,
+                thread.thread_id,
+            )
+
+        # Sync messages to conversation history for compaction tracking
+        for msg in current_messages[initial_len:]:
+            if msg["role"] in ("assistant", "tool"):
+                msg["thread_id"] = thread.thread_id
+                self.context.conversation_history.append(msg)
+
+        return stats
 
     def _create_checkpoint(self, thread_id: int, last_post_id: int) -> None:
         """
@@ -530,6 +946,44 @@ class AnnotationRunner:
             )
         except Exception as e:
             LOGGER.warning("Failed to create checkpoint snapshot: %s", e)
+
+    def _create_glossary_edit_snapshot(
+        self, thread_id: int, post_id: int, tool_name: str
+    ) -> int | None:
+        """Create snapshot before glossary edit for revision linkage (F11).
+
+        Args:
+            thread_id: Current thread ID.
+            post_id: Current post ID.
+            tool_name: Name of the glossary edit tool being called.
+
+        Returns:
+            Snapshot ID, or None if snapshots disabled.
+        """
+        if self.snapshots is None:
+            return None
+
+        try:
+            snapshot_id = self.snapshots.create(
+                snapshot_type="glossary_edit",
+                last_post_id=post_id,
+                last_thread_id=thread_id,
+                thread_position=self._thread_position,
+                context=self.context,
+                compaction_state=self.compaction_state,
+                glossary=self.glossary,
+                metadata={"tool": tool_name},
+            )
+            LOGGER.debug(
+                "Created glossary_edit snapshot %d for %s at post %d",
+                snapshot_id,
+                tool_name,
+                post_id,
+            )
+            return snapshot_id
+        except Exception as e:
+            LOGGER.warning("Failed to create glossary_edit snapshot: %s", e)
+            return None
 
     def _search_relevant_entries(self, scene: Scene) -> list[GlossaryEntry]:
         """Search glossary for entries relevant to the scene content."""
@@ -668,10 +1122,22 @@ class AnnotationRunner:
             for tool_call in tool_calls:
                 stats.tool_calls += 1
 
+                # Create snapshot before glossary edits for revision linkage (F11)
+                func = tool_call.get("function", {})
+                tool_name = func.get("name", "")
+                snapshot_id = None
+                if tool_name in self.GLOSSARY_EDIT_TOOLS:
+                    snapshot_id = self._create_glossary_edit_snapshot(
+                        scene.thread_id,
+                        scene.last_post_id or 0,
+                        tool_name,
+                    )
+
                 result = self.dispatcher.dispatch(
                     tool_call,
                     current_post_id=scene.last_post_id or 0,
                     current_thread_id=scene.thread_id,
+                    snapshot_id=snapshot_id,
                 )
 
                 # Track glossary modifications

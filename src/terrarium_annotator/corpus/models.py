@@ -54,3 +54,33 @@ class Scene:
     def post_count(self) -> int:
         """Number of posts in the scene."""
         return len(self.posts)
+
+
+@dataclass
+class ThreadContent:
+    """All QM posts from a thread for batch processing (F11).
+
+    Unlike Scene which represents a contiguous run of qm_posts,
+    ThreadContent contains ALL qm_posts from a thread regardless
+    of intervening non-QM posts.
+    """
+
+    thread_id: int
+    thread_title: str | None
+    qm_posts: list[StoryPost]
+    thread_position: int  # Ordinal position (1st, 2nd, 3rd thread...)
+
+    @property
+    def first_post_id(self) -> int | None:
+        """ID of the first QM post in the thread."""
+        return self.qm_posts[0].post_id if self.qm_posts else None
+
+    @property
+    def last_post_id(self) -> int | None:
+        """ID of the last QM post in the thread."""
+        return self.qm_posts[-1].post_id if self.qm_posts else None
+
+    @property
+    def post_count(self) -> int:
+        """Number of QM posts in the thread."""
+        return len(self.qm_posts)

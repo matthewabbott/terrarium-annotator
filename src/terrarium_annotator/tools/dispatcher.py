@@ -88,6 +88,7 @@ class ToolDispatcher:
         *,
         current_post_id: int,
         current_thread_id: int,
+        snapshot_id: int | None = None,
     ) -> ToolResult:
         """
         Execute tool call.
@@ -99,6 +100,7 @@ class ToolDispatcher:
                 - function.arguments: JSON string of args
             current_post_id: Post being processed (for revision logging)
             current_thread_id: Thread being processed (for revision logging)
+            snapshot_id: Snapshot ID for revision linkage (F11 glossary blame).
 
         Returns: ToolResult with success status and XML response.
         """
@@ -155,7 +157,7 @@ class ToolDispatcher:
         # Execute handler
         try:
             if requires_post:
-                result = handler(args, current_post_id, current_thread_id)
+                result = handler(args, current_post_id, current_thread_id, snapshot_id)
             else:
                 result = handler(args)
 
@@ -237,7 +239,9 @@ class ToolDispatcher:
             limit=args.get("limit", 10),
         )
 
-    def _handle_glossary_create(self, args: dict, post_id: int, thread_id: int) -> str:
+    def _handle_glossary_create(
+        self, args: dict, post_id: int, thread_id: int, snapshot_id: int | None
+    ) -> str:
         """Handle glossary_create tool call."""
         return self._glossary_tools.create(
             term=args["term"],
@@ -247,9 +251,12 @@ class ToolDispatcher:
             entry_type="glossary",
             post_id=post_id,
             thread_id=thread_id,
+            snapshot_id=snapshot_id,
         )
 
-    def _handle_codex_create(self, args: dict, post_id: int, thread_id: int) -> str:
+    def _handle_codex_create(
+        self, args: dict, post_id: int, thread_id: int, snapshot_id: int | None
+    ) -> str:
         """Handle codex_create tool call."""
         return self._glossary_tools.create(
             term=args["term"],
@@ -259,9 +266,12 @@ class ToolDispatcher:
             entry_type="codex",
             post_id=post_id,
             thread_id=thread_id,
+            snapshot_id=snapshot_id,
         )
 
-    def _handle_update(self, args: dict, post_id: int, thread_id: int) -> str:
+    def _handle_update(
+        self, args: dict, post_id: int, thread_id: int, snapshot_id: int | None
+    ) -> str:
         """Handle glossary_update tool call."""
         return self._glossary_tools.update(
             entry_id=args["entry_id"],
@@ -271,14 +281,18 @@ class ToolDispatcher:
             status=args.get("status"),
             post_id=post_id,
             thread_id=thread_id,
+            snapshot_id=snapshot_id,
         )
 
-    def _handle_delete(self, args: dict, post_id: int, thread_id: int) -> str:
+    def _handle_delete(
+        self, args: dict, post_id: int, thread_id: int, snapshot_id: int | None
+    ) -> str:
         """Handle glossary_delete tool call."""
         return self._glossary_tools.delete(
             entry_id=args["entry_id"],
             reason=args["reason"],
             post_id=post_id,
+            snapshot_id=snapshot_id,
         )
 
     def _handle_read_post(self, args: dict) -> str:

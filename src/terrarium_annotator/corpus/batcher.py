@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Iterator
 
-from terrarium_annotator.corpus.models import Scene, StoryPost
+from terrarium_annotator.corpus.models import Scene, StoryPost, ThreadContent
 
 if TYPE_CHECKING:
     from terrarium_annotator.corpus.reader import CorpusReader
@@ -137,3 +137,87 @@ class SceneBatcher:
                 is_thread_end=True,
                 scene_index=scene_index,
             )
+
+
+class ThreadIterator:
+    """Iterate through threads, yielding all QM posts per thread (F11).
+
+    Unlike SceneBatcher which yields scene-by-scene within threads,
+    ThreadIterator yields entire threads at once for batch processing.
+    """
+
+    QM_POST_TAG = "qm_post"
+
+    def __init__(self, corpus: CorpusReader) -> None:
+        """Initialize with corpus reader."""
+        self._corpus = corpus
+
+    def iter_threads(
+        self,
+        start_after_thread_id: int | None = None,
+        start_after_post_id: int | None = None,
+    ) -> Iterator[ThreadContent]:
+        """
+        Yield ThreadContent for each thread in chronological order.
+
+        Args:
+            start_after_thread_id: Skip threads until after this thread ID.
+            start_after_post_id: If provided along with start_after_thread_id,
+                resume within a thread from this post position.
+
+        Yields:
+            ThreadContent with all QM posts for each thread.
+        """
+        thread_position = 0
+        skip_until_thread = start_after_thread_id
+        resume_post_id = start_after_post_id
+
+        for thread in self._corpus.iter_threads():
+            # Skip threads until we find the resume point
+            if skip_until_thread is not None:
+                if thread.id != skip_until_thread:
+                    thread_position += 1
+                    continue
+                # Found the thread - clear skip flag
+                skip_until_thread = None
+                # If we have a post resume point, this is the thread to resume in
+                # Otherwise skip this completed thread entirely
+                if resume_post_id is None:
+                    thread_position += 1
+                    continue
+
+            thread_position += 1
+
+            # Collect all QM posts for this thread
+            qm_posts: list[StoryPost] = []
+            for post in self._corpus.iter_posts_by_thread(
+                thread.id,
+                start_after_post_id=resume_post_id if thread.id == start_after_thread_id else None,
+            ):
+                if post.has_tag(self.QM_POST_TAG):
+                    qm_posts.append(post)
+
+            # Clear resume point after first thread
+            resume_post_id = None
+
+            # Skip threads with no QM content
+            if not qm_posts:
+                continue
+
+            yield ThreadContent(
+                thread_id=thread.id,
+                thread_title=thread.title,
+                qm_posts=qm_posts,
+                thread_position=thread_position,
+            )
+
+    def get_thread_qm_posts(self, thread_id: int) -> list[StoryPost]:
+        """Get all QM posts for a specific thread.
+
+        Useful for loading previous thread context.
+        """
+        qm_posts: list[StoryPost] = []
+        for post in self._corpus.iter_posts_by_thread(thread_id):
+            if post.has_tag(self.QM_POST_TAG):
+                qm_posts.append(post)
+        return qm_posts

@@ -123,18 +123,37 @@ class RevisionHistory:
         status: str,
         *,
         source_post_id: int | None = None,
+        snapshot_id: int | None = None,
     ) -> None:
-        """Log a new entry creation (convenience method)."""
+        """Log a new entry creation (convenience method).
+
+        Args:
+            entry_id: Created entry ID.
+            term: Entry term.
+            definition: Entry definition.
+            tags: Entry tags.
+            status: Entry status.
+            source_post_id: Source post ID.
+            snapshot_id: Snapshot ID for blame linkage (F11).
+        """
         import json
 
-        self.log_change(entry_id, "term", None, term, source_post_id=source_post_id)
         self.log_change(
-            entry_id, "definition", None, definition, source_post_id=source_post_id
+            entry_id, "term", None, term,
+            source_post_id=source_post_id, snapshot_id=snapshot_id
         )
         self.log_change(
-            entry_id, "tags", None, json.dumps(tags), source_post_id=source_post_id
+            entry_id, "definition", None, definition,
+            source_post_id=source_post_id, snapshot_id=snapshot_id
         )
-        self.log_change(entry_id, "status", None, status, source_post_id=source_post_id)
+        self.log_change(
+            entry_id, "tags", None, json.dumps(tags),
+            source_post_id=source_post_id, snapshot_id=snapshot_id
+        )
+        self.log_change(
+            entry_id, "status", None, status,
+            source_post_id=source_post_id, snapshot_id=snapshot_id
+        )
 
     def log_deletion(
         self,

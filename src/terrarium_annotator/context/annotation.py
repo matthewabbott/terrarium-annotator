@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from terrarium_annotator.context.models import ChunkSummary, ThreadSummary
-    from terrarium_annotator.corpus import Scene
+    from terrarium_annotator.corpus import Scene, StoryPost, ThreadContent
     from terrarium_annotator.storage import GlossaryEntry
 
 
@@ -97,6 +97,135 @@ class AnnotationContext:
             messages.append({"role": "user", "content": user_content})
 
         return messages
+
+    def build_thread_messages(
+        self,
+        *,
+        current_thread: ThreadContent,
+        previous_thread_posts: list[StoryPost] | None = None,
+        cumulative_summary: str | None = None,
+        relevant_entries: list[GlossaryEntry] | None = None,
+        detected_terms_xml: str | None = None,
+    ) -> list[dict]:
+        """Build messages for thread-based processing (F11).
+
+        Constructs messages in order:
+        1. System prompt
+        2. Cumulative summary (all completed threads)
+        3. Previous thread QM posts (sliding window context)
+        4. Conversation history (accumulates within thread)
+        5. Current thread QM posts as user message
+
+        Args:
+            current_thread: ThreadContent being processed.
+            previous_thread_posts: QM posts from previous thread (context window).
+            cumulative_summary: Summary of all completed threads.
+            relevant_entries: Glossary entries to include for context.
+            detected_terms_xml: XML block with detected novel/semantic terms.
+
+        Returns:
+            List of message dicts ready for OpenAI chat completion API.
+        """
+        messages: list[dict] = [{"role": "system", "content": self.system_prompt}]
+
+        # Add cumulative summary
+        if cumulative_summary:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": f"<cumulative_summary>{cumulative_summary}</cumulative_summary>",
+                }
+            )
+
+        # Add previous thread's QM posts as context
+        if previous_thread_posts:
+            prev_xml = self._format_previous_thread(previous_thread_posts)
+            messages.append({"role": "system", "content": prev_xml})
+
+        # Add conversation history (accumulates within thread)
+        messages.extend(self.conversation_history)
+
+        # Build user payload with current thread's QM posts
+        user_content = self._format_thread_payload(
+            current_thread,
+            relevant_entries or [],
+            detected_terms_xml=detected_terms_xml,
+        )
+        messages.append({"role": "user", "content": user_content})
+
+        return messages
+
+    def reset_for_new_thread(self) -> None:
+        """Clear conversation history for new thread (F11).
+
+        Called between threads to reset accumulated history while
+        preserving cumulative summary in compaction state.
+        """
+        self.conversation_history = []
+
+    def _format_previous_thread(self, posts: list[StoryPost]) -> str:
+        """Format previous thread's QM posts as context window."""
+        if not posts:
+            return ""
+
+        thread_id = posts[0].thread_id if posts else 0
+        lines = [f'<previous_thread id="{thread_id}">']
+
+        for post in posts:
+            meta = [f'id="{post.post_id}"']
+            if post.created_at:
+                meta.append(f'ts="{post.created_at.isoformat()}"')
+            if post.author:
+                meta.append(f'author="{post.author}"')
+            attr = " ".join(meta)
+            body = (post.body or "").strip()
+            lines.append(f"<post {attr}>{body}</post>")
+
+        lines.append("</previous_thread>")
+        return "\n".join(lines)
+
+    def _format_thread_payload(
+        self,
+        thread: ThreadContent,
+        entries: list[GlossaryEntry],
+        detected_terms_xml: str | None = None,
+    ) -> str:
+        """Format all QM posts from a thread for user message."""
+        title = thread.thread_title or "Untitled"
+        lines = [f'<current_thread id="{thread.thread_id}" title="{title}">']
+
+        for post in thread.qm_posts:
+            meta = [f'id="{post.post_id}"']
+            if post.created_at:
+                meta.append(f'ts="{post.created_at.isoformat()}"')
+            if post.author:
+                meta.append(f'author="{post.author}"')
+            attr = " ".join(meta)
+            body = (post.body or "").strip()
+            lines.append(f"<post {attr}>{body}</post>")
+
+        lines.append("</current_thread>")
+
+        # Add detected terms
+        if detected_terms_xml:
+            lines.append("")
+            lines.append(detected_terms_xml)
+
+        # Add relevant glossary entries
+        if entries:
+            lines.append("<known_glossary>")
+            for entry in entries:
+                tags_attr = f' tags="{",".join(entry.tags)}"' if entry.tags else ""
+                lines.append(
+                    f'<term name="{entry.term}"{tags_attr}>{entry.definition}</term>'
+                )
+            lines.append("</known_glossary>")
+
+        lines.append(
+            "<instructions>Annotate this thread. Create or update glossary/codex "
+            "entries for significant terms and entities. Use tools as specified.</instructions>"
+        )
+        return "\n".join(lines)
 
     def record_turn(
         self,

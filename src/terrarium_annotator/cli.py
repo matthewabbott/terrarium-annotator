@@ -79,8 +79,8 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--context-budget",
         type=int,
-        default=98304,
-        help="Context budget in tokens (default: 98304)",
+        default=112640,
+        help="Context budget in tokens (default: 112640, ~110K for F11 thread mode)",
     )
     run_parser.add_argument(
         "--log-file",
@@ -99,6 +99,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["glossary", "codex", "both"],
         default="both",
         help="Which entry types to focus on: glossary (jargon), codex (wiki), or both (default: both)",
+    )
+    run_parser.add_argument(
+        "--legacy-scene-mode",
+        action="store_true",
+        help="Use legacy scene-by-scene processing instead of F11 thread mode",
     )
 
     # Export command
@@ -689,6 +694,7 @@ def run(args: argparse.Namespace) -> None:
         context_budget=args.context_budget,
         from_snapshot_id=getattr(args, "from_snapshot", None),
         sweep_mode=args.sweep_mode,
+        thread_mode=not getattr(args, "legacy_scene_mode", False),
     )
     runner = AnnotationRunner(config)
     try:
