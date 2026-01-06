@@ -33,8 +33,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument(
         "--annotator-db",
-        default="annotator.db",
-        help="Path to annotator SQLite DB (default: annotator.db)",
+        default="data/annotator.db",
+        help="Path to annotator SQLite DB (default: data/annotator.db)",
     )
     run_parser.add_argument(
         "--agent-url",
@@ -105,8 +105,8 @@ def build_parser() -> argparse.ArgumentParser:
     export_parser = subparsers.add_parser("export", help="Export glossary to JSON/YAML")
     export_parser.add_argument(
         "--annotator-db",
-        default="annotator.db",
-        help="Path to annotator database (default: annotator.db)",
+        default="data/annotator.db",
+        help="Path to annotator database (default: data/annotator.db)",
     )
     export_parser.add_argument(
         "--format",
@@ -137,8 +137,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     status_parser.add_argument(
         "--annotator-db",
-        default="annotator.db",
-        help="Path to annotator database (default: annotator.db)",
+        default="data/annotator.db",
+        help="Path to annotator database (default: data/annotator.db)",
     )
     status_parser.add_argument(
         "--format",
@@ -153,8 +153,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     inspect_parser.add_argument(
         "--annotator-db",
-        default="annotator.db",
-        help="Path to annotator database (default: annotator.db)",
+        default="data/annotator.db",
+        help="Path to annotator database (default: data/annotator.db)",
     )
     inspect_parser.add_argument(
         "--format",
