@@ -296,6 +296,7 @@ class CuratorFork:
                     post_id=0,
                     thread_id=thread_id,
                 )
+                self._log_decision(decision, thread_id)
             else:
                 # Get both entries
                 source = self.glossary.get(entry_id)
@@ -334,7 +335,7 @@ class CuratorFork:
                         post_id=0,
                         thread_id=thread_id,
                     )
-            self._log_decision(decision, thread_id)
+                    self._log_decision(decision, thread_id)
 
         elif decision.action == "REVISE":
             if decision.revised_definition:
