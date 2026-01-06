@@ -809,3 +809,328 @@ class TestAdaptiveCompaction:
         call_args = mock_summarizer.summarize_chunk.call_args
         assert call_args.kwargs["first_scene_index"] == 0
         assert call_args.kwargs["last_scene_index"] == 2
+
+
+class TestTailCompaction:
+    """Tests for Tier 0.5b/0.5c tail compaction (after chunks already summarized)."""
+
+    @pytest.fixture
+    def mock_counter(self):
+        counter = Mock()
+        counter.count_messages.return_value = 10000
+        return counter
+
+    @pytest.fixture
+    def mock_summarizer(self):
+        summarizer = Mock()
+        summarizer.summarize_chunk.return_value = ChunkSummary(
+            thread_id=1,
+            chunk_index=-1,
+            first_scene_index=14,
+            last_scene_index=16,
+            summary_text="Tail summary",
+        )
+        return summarizer
+
+    def test_get_tail_scene_range_no_chunks(self, mock_counter, mock_summarizer):
+        """Tail range should include all scenes when no chunks summarized."""
+        compactor = ContextCompactor(
+            mock_counter,
+            mock_summarizer,
+            context_budget=10000,
+            scenes_per_chunk=7,
+        )
+
+        state = CompactionState()
+        state.current_thread_id = 1
+        state.current_scene_index = 5  # Scenes 0-5
+
+        tail_start, tail_count = compactor._get_tail_scene_range(state)
+
+        assert tail_start == 0
+        assert tail_count == 6  # Scenes 0-5
+
+    def test_get_tail_scene_range_with_chunks(self, mock_counter, mock_summarizer):
+        """Tail range should start after last summarized chunk."""
+        compactor = ContextCompactor(
+            mock_counter,
+            mock_summarizer,
+            context_budget=10000,
+            scenes_per_chunk=7,
+        )
+
+        state = CompactionState()
+        state.current_thread_id = 1
+        state.current_scene_index = 20  # Scenes 0-20
+        state.summarized_chunk_indices = [0, 1]  # Chunks 0-6, 7-13 summarized
+
+        tail_start, tail_count = compactor._get_tail_scene_range(state)
+
+        # Tail should be scenes 14-20 (7 scenes)
+        assert tail_start == 14
+        assert tail_count == 7
+
+    def test_tier05b_fires_after_chunks_summarized(self, mock_counter, mock_summarizer):
+        """Tier 0.5b should fire even when chunks already summarized (not just initial)."""
+        mock_counter.count_messages.side_effect = [9000, 6000]
+
+        compactor = ContextCompactor(
+            mock_counter,
+            mock_summarizer,
+            context_budget=10000,
+            scenes_per_chunk=7,
+        )
+
+        # All complete chunks already summarized, but we have 5 tail scenes
+        state = CompactionState()
+        state.current_thread_id = 1
+        state.current_scene_index = 18  # Scenes 0-18
+        state.summarized_chunk_indices = [0, 1]  # Chunks 0-6, 7-13 done
+        state.chunk_summaries = [
+            ChunkSummary(1, 0, 0, 6, "Chunk 0"),
+            ChunkSummary(1, 1, 7, 13, "Chunk 1"),
+        ]
+
+        messages = [
+            {"role": "user", "content": "Scene 14", "thread_id": 1, "scene_index": 14},
+            {"role": "user", "content": "Scene 16", "thread_id": 1, "scene_index": 16},
+            {"role": "user", "content": "Scene 18", "thread_id": 1, "scene_index": 18},
+        ]
+
+        result_messages, result = compactor.compact(messages, state)
+
+        # Should use Tier 0.5b to compact tail (5 tail scenes >= 4 threshold)
+        assert result.chunks_summarized >= 1
+        assert result.highest_tier == 0.5
+
+    def test_tier05c_emergency_tail_compaction(self, mock_counter, mock_summarizer):
+        """Tier 0.5c should fire in emergency with even smaller tails (2-3 scenes)."""
+        # Emergency threshold (85%+) with small tail
+        mock_counter.count_messages.side_effect = [9100, 6000]
+
+        compactor = ContextCompactor(
+            mock_counter,
+            mock_summarizer,
+            context_budget=10000,
+            scenes_per_chunk=7,
+        )
+
+        # All chunks summarized, only 3 tail scenes (too few for 0.5b, but enough for 0.5c)
+        state = CompactionState()
+        state.current_thread_id = 1
+        state.current_scene_index = 16  # Scenes 0-16
+        state.summarized_chunk_indices = [0, 1]  # Chunks 0-6, 7-13 done
+        state.chunk_summaries = [
+            ChunkSummary(1, 0, 0, 6, "Chunk 0"),
+            ChunkSummary(1, 1, 7, 13, "Chunk 1"),
+        ]
+
+        messages = [
+            {"role": "user", "content": "Scene 14", "thread_id": 1, "scene_index": 14},
+            {"role": "user", "content": "Scene 16", "thread_id": 1, "scene_index": 16},
+        ]
+
+        result_messages, result = compactor.compact(messages, state)
+
+        # In emergency mode, even 3 tail scenes should trigger 0.5c
+        # (tail_count >= 2 in emergency)
+        assert result.chunks_summarized >= 1
+
+
+class TestDoomLoopFix:
+    """Tests for doom loop detector improvements."""
+
+    @pytest.fixture
+    def mock_counter(self):
+        counter = Mock()
+        return counter
+
+    @pytest.fixture
+    def mock_summarizer(self):
+        summarizer = Mock()
+        return summarizer
+
+    def test_doom_loop_continues_in_emergency(self, mock_counter, mock_summarizer):
+        """Doom loop should continue trying tiers in emergency mode."""
+        # Always return same high value - would normally trigger doom loop break
+        mock_counter.count_messages.return_value = 9500
+
+        compactor = ContextCompactor(
+            mock_counter,
+            mock_summarizer,
+            context_budget=10000,
+        )
+
+        # Emergency mode with messages to potentially trim/truncate
+        messages = [
+            {"role": "assistant", "content": "<thinking>Thoughts</thinking>Response"},
+            {"role": "user", "content": "Q1"},
+            {"role": "assistant", "content": "A" * 1000},
+            {"role": "user", "content": "Q2"},
+            {"role": "assistant", "content": "Short"},
+            {"role": "user", "content": "Q3"},
+            {"role": "assistant", "content": "Short"},
+            {"role": "user", "content": "Q4"},
+            {"role": "assistant", "content": "Recent"},
+            {"role": "user", "content": "Q5"},
+        ]
+
+        state = CompactionState(completed_thread_ids=[1])
+        result_messages, result = compactor.compact(messages, state)
+
+        # In emergency, should try Tier 3 (trim) and Tier 4 (truncate)
+        # even if no progress is made on token count
+        assert result.highest_tier >= 3 or result.turns_trimmed > 0 or result.responses_truncated > 0
+
+
+class TestTier5NuclearCompaction:
+    """Tests for Tier 5 nuclear compaction (drop all conversation history)."""
+
+    @pytest.fixture
+    def mock_counter(self):
+        counter = Mock()
+        return counter
+
+    @pytest.fixture
+    def mock_summarizer(self):
+        summarizer = Mock()
+        return summarizer
+
+    def test_nuclear_threshold_at_95_percent(self, mock_counter, mock_summarizer):
+        """Nuclear compaction should have threshold at 95%."""
+        compactor = ContextCompactor(
+            mock_counter,
+            mock_summarizer,
+            context_budget=10000,  # 95% = 9500
+        )
+
+        assert compactor.nuclear_threshold == 9500
+
+    def test_nuclear_drops_all_history(self, mock_counter, mock_summarizer):
+        """Tier 5 nuclear should drop all non-system, non-current-user messages."""
+        # Above nuclear threshold (95%+), should trigger nuclear
+        mock_counter.count_messages.side_effect = [9600, 3000]
+
+        compactor = ContextCompactor(
+            mock_counter,
+            mock_summarizer,
+            context_budget=10000,
+        )
+
+        messages = [
+            {"role": "system", "content": "System prompt"},
+            {"role": "system", "content": "<cumulative_summary>Summary</cumulative_summary>"},
+            {"role": "user", "content": "Old scene 1", "thread_id": 1, "scene_index": 0},
+            {"role": "assistant", "content": "Response 1", "thread_id": 1, "scene_index": 0},
+            {"role": "user", "content": "Old scene 2", "thread_id": 1, "scene_index": 1},
+            {"role": "assistant", "content": "Response 2", "thread_id": 1, "scene_index": 1},
+            {"role": "user", "content": "Current scene"},  # Last user = current
+        ]
+
+        state = CompactionState(completed_thread_ids=[1])
+        result_messages, result = compactor.compact(messages, state)
+
+        # Should only keep system messages + last user message
+        assert result.highest_tier == 5
+        assert result.history_dropped is True
+        assert len(result_messages) == 3  # 2 system + 1 user
+        assert result_messages[0]["role"] == "system"
+        assert result_messages[1]["role"] == "system"
+        assert result_messages[2]["role"] == "user"
+        assert result_messages[2]["content"] == "Current scene"
+
+    def test_nuclear_clears_context_history(self, mock_counter, mock_summarizer):
+        """Tier 5 nuclear should clear the persistent conversation_history."""
+        mock_counter.count_messages.side_effect = [9600, 3000]
+
+        compactor = ContextCompactor(
+            mock_counter,
+            mock_summarizer,
+            context_budget=10000,
+        )
+
+        # Create a real AnnotationContext with history
+        from terrarium_annotator.context.annotation import AnnotationContext
+        context = AnnotationContext(system_prompt="Test prompt")
+        context.conversation_history = [
+            {"role": "user", "content": "Old"},
+            {"role": "assistant", "content": "Response"},
+        ]
+
+        messages = [
+            {"role": "system", "content": "System"},
+            {"role": "user", "content": "Current"},
+        ]
+
+        state = CompactionState()
+        result_messages, result = compactor.compact(messages, state, context)
+
+        # conversation_history should be cleared
+        assert result.history_dropped is True
+        assert len(context.conversation_history) == 0
+
+    def test_nuclear_only_triggers_in_emergency(self, mock_counter, mock_summarizer):
+        """Tier 5 should only trigger after emergency tiers are exhausted."""
+        # At 92% - above emergency (85%) but below nuclear (95%)
+        mock_counter.count_messages.return_value = 9200
+
+        compactor = ContextCompactor(
+            mock_counter,
+            mock_summarizer,
+            context_budget=10000,
+        )
+
+        messages = [
+            {"role": "system", "content": "System"},
+            {"role": "user", "content": "Current"},
+        ]
+
+        state = CompactionState()
+        result_messages, result = compactor.compact(messages, state)
+
+        # Should NOT have triggered nuclear (below 95%)
+        assert result.highest_tier < 5
+        assert result.history_dropped is False
+
+    def test_nuclear_logs_fatal_if_still_over_budget(self, mock_counter, mock_summarizer):
+        """Nuclear should log FATAL if still over 100% after dropping history."""
+        # Even after nuclear, still over budget
+        mock_counter.count_messages.side_effect = [9600, 11000]  # Still over budget!
+
+        compactor = ContextCompactor(
+            mock_counter,
+            mock_summarizer,
+            context_budget=10000,
+        )
+
+        messages = [
+            {"role": "system", "content": "System"},
+            {"role": "user", "content": "Current"},
+        ]
+
+        state = CompactionState()
+        result_messages, result = compactor.compact(messages, state)
+
+        # Should have attempted nuclear
+        assert result.highest_tier == 5
+        assert result.history_dropped is True
+        # final_tokens should reflect the over-budget state
+        assert result.final_tokens == 11000
+
+    def test_result_history_dropped_flag(self, mock_counter, mock_summarizer):
+        """CompactionResult should have history_dropped flag."""
+        result = CompactionResult(
+            initial_tokens=10000,
+            final_tokens=3000,
+            chunks_summarized=0,
+            threads_summarized=0,
+            summaries_merged=0,
+            turns_trimmed=0,
+            responses_truncated=0,
+            target_reached=True,
+            highest_tier=5,
+            history_dropped=True,
+        )
+
+        assert result.history_dropped is True
+        assert result.highest_tier == 5

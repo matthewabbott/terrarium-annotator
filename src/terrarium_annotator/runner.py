@@ -598,10 +598,32 @@ class AnnotationRunner:
                     current_messages, self.compaction_state, self.context
                 )
                 LOGGER.info(
-                    "Compacted: %d -> %d tokens (target reached: %s)",
+                    "Compacted: %d -> %d tokens (tier: %.1f, target reached: %s%s)",
                     compact_result.initial_tokens,
                     compact_result.final_tokens,
+                    compact_result.highest_tier,
                     compact_result.target_reached,
+                    ", NUCLEAR" if compact_result.history_dropped else "",
+                )
+
+            # Hard abort: if context exceeds 100% even after all compaction tiers,
+            # something is fundamentally broken - raise error and stop run
+            tokens, usage_pct = self.compactor.get_current_usage(current_messages)
+            if usage_pct > 100:
+                LOGGER.error(
+                    "FATAL: Context exceeds budget (%.1f%% = %d/%d tokens) "
+                    "even after all compaction tiers. This indicates a fundamental "
+                    "configuration problem. Scene %d-%d.",
+                    usage_pct,
+                    tokens,
+                    self.compactor.budget,
+                    scene.first_post_id,
+                    scene.last_post_id,
+                )
+                raise RuntimeError(
+                    f"Context budget exceeded: {tokens}/{self.compactor.budget} tokens "
+                    f"({usage_pct:.1f}%). System prompt + summaries + current scene "
+                    "exceeds context budget. Increase budget or reduce prompt size."
                 )
 
             # Call agent

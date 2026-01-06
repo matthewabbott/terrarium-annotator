@@ -32,7 +32,8 @@ class CompactionResult:
     turns_trimmed: int
     responses_truncated: int
     target_reached: bool
-    highest_tier: float = 0  # 0 = no compaction, 0.5/1/2/3/4 = tier used
+    highest_tier: float = 0  # 0 = no compaction, 0.5/1/2/3/4/5 = tier used
+    history_dropped: bool = False  # True if Tier 5 nuclear was applied
 
 
 @dataclass
@@ -124,12 +125,14 @@ class ContextCompactor:
     - Under 60%: No compaction needed
     - ≥80%: Tier 0.5 (chunks) or Tier 1 (threads) until <60%
     - ≥85%: Emergency Tiers 3-4 (trim thinking, truncate)
+    - ≥95%: Tier 5 nuclear - drop all conversation history
 
     Tiers:
     0.5. Summarize oldest completed chunk → add to chunk_summaries (intra-thread)
     1.   Summarize thread → merge into cumulative_summary (thread boundary)
     3.   Trim <thinking> blocks from old messages (emergency)
     4.   Truncate old assistant responses (emergency)
+    5.   Nuclear - drop ALL conversation history (keeps only system + summaries)
 
     Key insight: Compaction modifies BOTH the messages list AND the
     underlying conversation_history, so changes persist across scenes.
@@ -144,6 +147,7 @@ class ContextCompactor:
         soft_ratio: float = 0.60,
         thread_compact_ratio: float = 0.80,
         emergency_ratio: float = 0.85,
+        nuclear_ratio: float = 0.95,
         target_ratio: float = 0.70,
         scenes_per_chunk: int = 7,
         preserve_recent_chunks: int = 2,
@@ -159,6 +163,7 @@ class ContextCompactor:
             soft_ratio: Under this, skip compaction entirely (default 60%).
             thread_compact_ratio: Enable rolling compaction (default 80%).
             emergency_ratio: Emergency compaction with all tiers (default 85%).
+            nuclear_ratio: Nuclear compaction - drop all history (default 95%).
             target_ratio: Target ratio after compaction (default 70%).
             scenes_per_chunk: Number of scenes per chunk for Tier 0.5 (default 7).
             preserve_recent_chunks: Keep this many recent chunks intact (default 2).
@@ -170,6 +175,7 @@ class ContextCompactor:
         self.soft_threshold = int(context_budget * soft_ratio)
         self.thread_compact_threshold = int(context_budget * thread_compact_ratio)
         self.emergency_threshold = int(context_budget * emergency_ratio)
+        self.nuclear_threshold = int(context_budget * nuclear_ratio)
         self.target = int(context_budget * target_ratio)
         self.scenes_per_chunk = scenes_per_chunk
         self.preserve_recent_chunks = preserve_recent_chunks
@@ -266,6 +272,14 @@ class ContextCompactor:
 
             # Detect no-progress doom loop
             if current_tokens >= prev_tokens:
+                # In emergency mode, don't break until we've tried all tiers
+                if is_emergency and result.highest_tier < 4:
+                    LOGGER.debug(
+                        "Compaction stalled at %d tokens but emergency mode - trying more tiers",
+                        current_tokens,
+                    )
+                    prev_tokens = current_tokens + 1  # Reset stall detector
+                    continue
                 LOGGER.warning(
                     "Compaction stalled at %d tokens (no progress), breaking",
                     current_tokens,
@@ -348,22 +362,54 @@ class ContextCompactor:
                     break
                 continue
 
-            # Tier 0.5b: Partial chunk fallback
-            # If no full chunks available, summarize half of current scenes
+            # Tier 0.5b: Tail compaction fallback
+            # Summarize "tail" scenes that don't form a complete chunk
+            # This fires when: no full chunks to summarize, but we have 4+ tail scenes
+            tail_start, tail_count = self._get_tail_scene_range(state)
             if (
-                state.current_scene_index >= 6
-                and not state.summarized_chunk_indices
+                tail_count >= 4
                 and state.current_thread_id is not None
             ):
-                half = state.current_scene_index // 2
-                if half >= 3:
+                # Summarize half of the tail (keep recent half intact)
+                half = tail_count // 2
+                if half >= 2:
+                    last_scene_to_summarize = tail_start + half - 1
                     LOGGER.info(
-                        "Tier 0.5b: Force partial chunk (scenes 0-%d) of thread %d",
-                        half - 1,
+                        "Tier 0.5b: Tail compaction (scenes %d-%d) of thread %d",
+                        tail_start,
+                        last_scene_to_summarize,
                         state.current_thread_id,
                     )
                     messages, compacted = self._summarize_partial_chunk(
-                        messages, state, context, last_scene=half - 1
+                        messages, state, context,
+                        first_scene=tail_start,
+                        last_scene=last_scene_to_summarize,
+                    )
+                    if compacted:
+                        result.chunks_summarized += 1
+                        result.highest_tier = max(result.highest_tier, 0.5)
+                        current_tokens = self.counter.count_messages(messages)
+                        if current_tokens < self.soft_threshold:
+                            result.target_reached = True
+                            break
+                        continue
+
+            # Tier 0.5c: Emergency tail compaction (even smaller tails)
+            # At emergency threshold, summarize even 2-3 tail scenes
+            if is_emergency and tail_count >= 2 and state.current_thread_id is not None:
+                # In emergency, summarize all but 1 tail scene
+                last_scene_to_summarize = tail_start + tail_count - 2
+                if last_scene_to_summarize >= tail_start:
+                    LOGGER.info(
+                        "Tier 0.5c: Emergency tail compaction (scenes %d-%d) of thread %d",
+                        tail_start,
+                        last_scene_to_summarize,
+                        state.current_thread_id,
+                    )
+                    messages, compacted = self._summarize_partial_chunk(
+                        messages, state, context,
+                        first_scene=tail_start,
+                        last_scene=last_scene_to_summarize,
                     )
                     if compacted:
                         result.chunks_summarized += 1
@@ -446,6 +492,30 @@ class ContextCompactor:
                 result.responses_truncated += count
                 result.highest_tier = max(result.highest_tier, 4)
                 current_tokens = self.counter.count_messages(messages)
+                continue
+
+            # Tier 5: Nuclear - drop ALL conversation history
+            # Only triggered at 95%+ when all other tiers exhausted
+            if current_tokens > self.nuclear_threshold:
+                LOGGER.warning(
+                    "Tier 5 NUCLEAR: Dropping all conversation history "
+                    "(%d tokens > %d nuclear threshold)",
+                    current_tokens,
+                    self.nuclear_threshold,
+                )
+                messages = self._nuclear_compact(messages, context)
+                result.highest_tier = 5
+                result.history_dropped = True
+                current_tokens = self.counter.count_messages(messages)
+                # If still over budget after nuclear, we have a fundamental problem
+                # (system prompt + summaries + single scene exceeds budget)
+                if current_tokens > self.budget:
+                    LOGGER.error(
+                        "FATAL: Context exceeds budget even after nuclear compaction! "
+                        "%d > %d. System prompt + summaries + scene is too large.",
+                        current_tokens,
+                        self.budget,
+                    )
                 continue
 
             # No more compaction options
@@ -627,12 +697,61 @@ class ContextCompactor:
 
         return result, truncated_count
 
+    def _get_tail_scene_range(
+        self, state: CompactionState
+    ) -> tuple[int, int]:
+        """
+        Get the range of unsummarized "tail" scenes in the current thread.
+
+        Tail scenes are scenes after the last summarized chunk that don't yet
+        form a complete chunk.
+
+        Args:
+            state: Compaction state.
+
+        Returns:
+            Tuple of (first_tail_scene_index, tail_scene_count).
+            If no tail scenes, returns (0, 0).
+        """
+        if state.current_thread_id is None:
+            return 0, 0
+
+        # Find the last scene index that was summarized
+        # Regular chunks: index * scenes_per_chunk through (index+1) * scenes_per_chunk - 1
+        # Partial chunks use negative indices, track their last_scene separately
+        last_summarized_scene = -1
+
+        for chunk_idx in state.summarized_chunk_indices:
+            if chunk_idx >= 0:
+                # Regular chunk
+                chunk_last = (chunk_idx + 1) * self.scenes_per_chunk - 1
+                last_summarized_scene = max(last_summarized_scene, chunk_last)
+            # Partial chunks (negative indices) are tracked in chunk_summaries
+            # but their scene ranges are already removed, so we check summaries
+
+        # Also check chunk_summaries for partial chunks' last scene
+        for cs in state.chunk_summaries:
+            if cs.thread_id == state.current_thread_id:
+                last_summarized_scene = max(last_summarized_scene, cs.last_scene_index)
+
+        # Tail starts after the last summarized scene
+        tail_start = last_summarized_scene + 1
+        # Tail count is from tail_start to current_scene_index (inclusive)
+        # current_scene_index is 0-indexed, so scene 5 means scenes 0-5 exist
+        tail_count = state.current_scene_index - tail_start + 1
+
+        if tail_count < 0:
+            tail_count = 0
+
+        return tail_start, tail_count
+
     def _summarize_partial_chunk(
         self,
         messages: list[dict],
         state: CompactionState,
         context: AnnotationContext | None,
         last_scene: int,
+        first_scene: int = 0,
     ) -> tuple[list[dict], bool]:
         """
         Summarize a partial chunk (fewer than scenes_per_chunk scenes).
@@ -644,6 +763,7 @@ class ContextCompactor:
             state: Compaction state.
             context: AnnotationContext for persistent history changes.
             last_scene: Last scene index to include (0-indexed, inclusive).
+            first_scene: First scene index to include (0-indexed, inclusive).
 
         Returns:
             Tuple of (modified messages, whether compaction happened).
@@ -652,7 +772,6 @@ class ContextCompactor:
         if thread_id is None:
             return messages, False
 
-        first_scene = 0
         # Use chunk_index = -1 to indicate partial chunk
         chunk_idx = -1 - len(state.summarized_chunk_indices)
 
@@ -696,3 +815,53 @@ class ContextCompactor:
             )
 
         return messages, True
+
+    def _nuclear_compact(
+        self,
+        messages: list[dict],
+        context: AnnotationContext | None,
+    ) -> list[dict]:
+        """
+        Nuclear compaction: drop ALL conversation history.
+
+        Keeps only:
+        - System messages (prompt, cumulative summary, chunk summaries)
+        - The last user message (current scene)
+
+        This is a last resort when context exceeds 95% and all other
+        compaction tiers have been exhausted.
+
+        Args:
+            messages: Current message list.
+            context: AnnotationContext to clear history from.
+
+        Returns:
+            Minimal message list with only system + current scene.
+        """
+        # Keep system messages and the last user message
+        system_messages = [m for m in messages if m.get("role") == "system"]
+        user_messages = [m for m in messages if m.get("role") == "user"]
+        last_user = user_messages[-1] if user_messages else None
+
+        result = list(system_messages)
+        if last_user:
+            result.append(last_user)
+
+        dropped_count = len(messages) - len(result)
+        LOGGER.warning(
+            "Nuclear compaction: dropped %d messages, keeping %d system + %d user",
+            dropped_count,
+            len(system_messages),
+            1 if last_user else 0,
+        )
+
+        # Clear the persistent conversation history
+        if context is not None:
+            history_len = len(context.conversation_history)
+            context.conversation_history.clear()
+            LOGGER.info(
+                "Nuclear compaction: cleared %d entries from conversation_history",
+                history_len,
+            )
+
+        return result
