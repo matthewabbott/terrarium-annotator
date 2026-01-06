@@ -261,6 +261,36 @@ MIGRATION_007_ENTRY_TYPE = Migration(
     ],
 )
 
+# Migration 008: Add 'glossary_edit' snapshot type for blame tracking (F11)
+# SQLite doesn't support ALTER CONSTRAINT, so recreate the table
+MIGRATION_008_GLOSSARY_EDIT_SNAPSHOT_TYPE = Migration(
+    version=8,
+    name="add_glossary_edit_snapshot_type",
+    statements=[
+        # Create new table with expanded CHECK constraint
+        """
+        CREATE TABLE snapshot_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            snapshot_type TEXT NOT NULL
+                CHECK (snapshot_type IN ('checkpoint', 'curator_fork', 'manual', 'glossary_edit')),
+            created_at TEXT NOT NULL,
+            last_post_id INTEGER NOT NULL,
+            last_thread_id INTEGER NOT NULL,
+            thread_position INTEGER NOT NULL,
+            glossary_entry_count INTEGER NOT NULL,
+            context_token_count INTEGER,
+            metadata TEXT
+        )
+        """,
+        "INSERT INTO snapshot_new SELECT * FROM snapshot",
+        "DROP TABLE snapshot",
+        "ALTER TABLE snapshot_new RENAME TO snapshot",
+        "CREATE INDEX idx_snapshot_created ON snapshot(created_at)",
+        "CREATE INDEX idx_snapshot_thread ON snapshot(last_thread_id)",
+        "CREATE INDEX idx_snapshot_type ON snapshot(snapshot_type)",
+    ],
+)
+
 # All migrations in order
 ALL_MIGRATIONS: list[Migration] = [
     MIGRATION_001_INITIAL,
@@ -270,6 +300,7 @@ ALL_MIGRATIONS: list[Migration] = [
     MIGRATION_005_SNAPSHOT_THREAD_IDS,
     MIGRATION_006_COMPACTION_STATE,
     MIGRATION_007_ENTRY_TYPE,
+    MIGRATION_008_GLOSSARY_EDIT_SNAPSHOT_TYPE,
 ]
 
 
