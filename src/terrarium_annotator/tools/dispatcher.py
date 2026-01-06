@@ -82,6 +82,13 @@ class ToolDispatcher:
         "codex_create", "codex_update", "codex_delete",
     }
 
+    # Tools to exclude in thread mode (F11)
+    # All content is provided upfront, no need for corpus/snapshot tools
+    _THREAD_MODE_EXCLUDED_TOOLS = {
+        "read_post", "read_thread_range",  # Corpus tools - content already provided
+        "list_snapshots", "summon_snapshot", "summon_continue", "summon_dismiss",  # Snapshot tools
+    }
+
     def dispatch(
         self,
         tool_call: dict,
@@ -190,7 +197,9 @@ class ToolDispatcher:
                 error=str(e),
             )
 
-    def get_tool_definitions(self, sweep_mode: str = "both") -> list[dict]:
+    def get_tool_definitions(
+        self, sweep_mode: str = "both", thread_mode: bool = False
+    ) -> list[dict]:
         """Return OpenAI function calling schemas.
 
         Args:
@@ -198,11 +207,21 @@ class ToolDispatcher:
                 - "glossary": Only glossary tools
                 - "codex": Only codex tools
                 - "both": Both glossary and codex tools (default)
+            thread_mode: If True, exclude corpus and snapshot tools (F11).
+                In thread mode, all content is provided upfront.
         """
-        return get_all_tool_schemas(
+        tools = get_all_tool_schemas(
             include_snapshot_tools=self._snapshots is not None,
             sweep_mode=sweep_mode,
         )
+
+        if thread_mode:
+            tools = [
+                t for t in tools
+                if t["function"]["name"] not in self._THREAD_MODE_EXCLUDED_TOOLS
+            ]
+
+        return tools
 
     @property
     def has_active_summon(self) -> bool:

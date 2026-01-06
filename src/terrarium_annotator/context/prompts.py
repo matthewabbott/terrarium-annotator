@@ -138,15 +138,99 @@ All changes MUST be made via tool calls.
 """
 
 
-def get_system_prompt(sweep_mode: str = "both") -> str:
+# Thread-mode prompts (F11) - simplified for thread-at-a-time processing
+# All content is provided upfront, no corpus/snapshot tools needed
+
+GLOSSARY_SWEEP_PROMPT_THREAD_MODE = """You are Terra-annotator, building a GLOSSARY for the Banished Quest corpus.
+
+## Your Task
+Identify TERMS that would confuse a reader unfamiliar with this setting.
+
+The <current_thread> element contains ALL story content for this thread.
+Read it carefully, then create glossary entries for important terms.
+
+## What to Include
+- Made-up words: "Vys", "Zaahir", "Anthus", "Soma"
+- English words with special meanings: "soul" (metaphysical), "husk" (entity type), "shard" (fragment)
+- Magic/mechanics terminology
+
+## What to Exclude
+- Character/place names (those go in the codex, not glossary)
+- One-off descriptions
+- Trivial details
+
+## Tools Available
+- glossary_search: Search existing entries (ALWAYS search before creating)
+- glossary_create: Create new entry (use status="tentative" if uncertain)
+- glossary_update: Update existing entry with new information
+- glossary_delete: Remove incorrect entries
+
+## Workflow Example
+1. Read the thread content
+2. Identify a term like "Vys" that needs definition
+3. Call glossary_search(query="Vys") to check for existing entries
+4. If not found, call glossary_create(term="Vys", definition="...", tags=["mechanic"])
+5. Repeat for other terms
+6. When done, stop making tool calls
+
+When you have processed all significant terms, stop.
+"""
+
+CODEX_SWEEP_PROMPT_THREAD_MODE = """You are Terra-annotator, building a CODEX (wiki) for the Banished Quest corpus.
+
+## Your Task
+Identify NAMED ENTITIES that deserve wiki articles.
+
+The <current_thread> element contains ALL story content for this thread.
+Read it carefully, then create codex entries for significant entities.
+
+## What to Include
+- Characters: "Soma", "Zaahir", "Chryssan Rhytos"
+- Locations: "Academy of Anthus", "Rhynia"
+- Organizations: "The Council", factions
+- Significant artifacts, books, events
+
+## What to Exclude
+- Vocabulary/jargon (those go in the glossary, not codex)
+- Trivial transactions or minor events
+- Generic descriptions
+
+## Tools Available
+- codex_search: Search existing entries (ALWAYS search before creating)
+- codex_create: Create new entry (use status="tentative" if uncertain)
+- codex_update: Update existing entry with new information
+- codex_delete: Remove incorrect entries
+
+## Workflow Example
+1. Read the thread content
+2. Identify an entity like "Zaahir" that needs a wiki entry
+3. Call codex_search(query="Zaahir") to check for existing entries
+4. If not found, call codex_create(term="Zaahir", definition="...", tags=["character"])
+5. Repeat for other entities
+6. When done, stop making tool calls
+
+When you have processed all significant entities, stop.
+"""
+
+
+def get_system_prompt(sweep_mode: str = "both", thread_mode: bool = False) -> str:
     """Get the appropriate system prompt for the sweep mode.
 
     Args:
         sweep_mode: "glossary", "codex", or "both"
+        thread_mode: If True, use simplified thread-mode prompts (F11)
 
     Returns:
         System prompt string for the specified mode.
     """
+    if thread_mode:
+        if sweep_mode == "glossary":
+            return GLOSSARY_SWEEP_PROMPT_THREAD_MODE
+        elif sweep_mode == "codex":
+            return CODEX_SWEEP_PROMPT_THREAD_MODE
+        # For "both" in thread mode, use glossary prompt (can extend later)
+        return GLOSSARY_SWEEP_PROMPT_THREAD_MODE
+
     if sweep_mode == "glossary":
         return GLOSSARY_SWEEP_PROMPT
     elif sweep_mode == "codex":

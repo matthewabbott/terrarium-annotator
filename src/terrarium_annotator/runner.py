@@ -129,7 +129,9 @@ class AnnotationRunner:
 
         # Context (F2) - may be restored from snapshot below
         self.context = AnnotationContext(
-            system_prompt=get_system_prompt(config.sweep_mode),
+            system_prompt=get_system_prompt(
+                config.sweep_mode, thread_mode=config.thread_mode
+            ),
         )
 
         # Tools (F3)
@@ -789,7 +791,9 @@ class AnnotationRunner:
             ToolStats with counts of operations performed.
         """
         stats = ToolStats()
-        tools = self.dispatcher.get_tool_definitions(sweep_mode=self.config.sweep_mode)
+        tools = self.dispatcher.get_tool_definitions(
+            sweep_mode=self.config.sweep_mode, thread_mode=True
+        )
         current_messages = list(messages)
         initial_len = len(messages)
 
