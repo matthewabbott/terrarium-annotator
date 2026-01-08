@@ -68,6 +68,8 @@ class RunnerConfig:
     sweep_mode: str = "both"
     # Thread mode (F11): process entire threads at once vs scene-by-scene
     thread_mode: bool = True
+    # Reader mode: scene-based with glossary-as-memory (near-stateless)
+    reader_mode: bool = False
 
 
 @dataclass
@@ -102,7 +104,7 @@ class AnnotationRunner:
 
     # Tools that modify glossary/codex and should trigger snapshots (F11)
     GLOSSARY_EDIT_TOOLS = {
-        "glossary_create", "glossary_update", "glossary_delete",
+        "glossary_create", "glossary_update", "glossary_delete", "glossary_upsert",
         "codex_create", "codex_update", "codex_delete",
     }
 
@@ -130,7 +132,9 @@ class AnnotationRunner:
         # Context (F2) - may be restored from snapshot below
         self.context = AnnotationContext(
             system_prompt=get_system_prompt(
-                config.sweep_mode, thread_mode=config.thread_mode
+                config.sweep_mode,
+                thread_mode=config.thread_mode,
+                reader_mode=config.reader_mode,
             ),
         )
 
@@ -279,6 +283,8 @@ class AnnotationRunner:
         Returns:
             RunResult with stats and final state.
         """
+        if self.config.reader_mode:
+            return self._run_reader_mode(limit)
         if self.config.thread_mode:
             return self._run_thread_mode(limit)
         return self._run_scene_mode(limit)
@@ -747,6 +753,327 @@ class AnnotationRunner:
             final_state=final_state,
             thread_mode=True,
         )
+
+    def _run_reader_mode(self, limit: int | None = None) -> RunResult:
+        """Execute reader mode: scene-based with glossary-as-memory.
+
+        Each scene is processed with minimal context:
+        - Story summary (cumulative)
+        - Current scene content
+        - Glossary entries for terms in this scene
+
+        Conversation history resets between scenes - the glossary IS the memory.
+        """
+        start_time = time.time()
+
+        # Install graceful shutdown handlers
+        self._install_signal_handlers()
+
+        # Get checkpoint for resume
+        state = self.progress.get_state()
+        if self._resume_from_snapshot_post_id is not None:
+            start_after_post_id = self._resume_from_snapshot_post_id
+        elif self.config.resume:
+            start_after_post_id = state.last_post_id
+        else:
+            start_after_post_id = None
+
+        LOGGER.info(
+            "Starting reader mode annotation run (resume=%s, start_after=%s)",
+            self.config.resume,
+            start_after_post_id,
+        )
+
+        # Mark run started
+        self.progress.start_run()
+
+        # Aggregate stats
+        scenes_processed = 0
+        total_posts = 0
+        total_created = 0
+        total_updated = 0
+        total_deleted = 0
+        total_tool_calls = 0
+        total_inference_time = 0.0
+        current_thread_id: int | None = None
+
+        # Scene iteration
+        for scene in self.batcher.iter_scenes(start_after_post_id=start_after_post_id):
+            # Thread boundary detection
+            if current_thread_id != scene.thread_id:
+                if current_thread_id is not None:
+                    self.progress.update_thread_state(
+                        current_thread_id, status="completed"
+                    )
+                    self.compaction_state.completed_thread_ids.append(current_thread_id)
+                    LOGGER.info(
+                        "Thread %d completed",
+                        current_thread_id,
+                    )
+
+                    # Create checkpoint snapshot
+                    self._create_checkpoint(
+                        thread_id=current_thread_id,
+                        last_post_id=scene.first_post_id - 1,
+                    )
+
+                current_thread_id = scene.thread_id
+                self._thread_position += 1
+                self.progress.update_thread_state(
+                    current_thread_id, status="in_progress"
+                )
+                LOGGER.info(
+                    "Starting thread %d (position %d)",
+                    current_thread_id,
+                    self._thread_position,
+                )
+
+            LOGGER.info(
+                "Processing scene %d-%d (thread %d, %d posts)",
+                scene.first_post_id,
+                scene.last_post_id,
+                scene.thread_id,
+                scene.post_count,
+            )
+
+            scene_start_time = time.time()
+
+            # Reset conversation history for each scene (glossary is the memory)
+            self.context.reset_for_new_scene()
+
+            # Get glossary context for terms in this scene
+            glossary_context = self._get_glossary_context_for_scene(scene)
+
+            # Build messages with reader mode structure
+            messages = self.context.build_reader_messages(
+                current_scene=scene,
+                story_summary=self.compaction_state.cumulative_summary or None,
+                glossary_context=glossary_context,
+            )
+
+            # Log context usage
+            tokens, usage_pct = self.compactor.get_current_usage(messages)
+            LOGGER.info(
+                "Context: %d tokens (%.1f%%) | scene %d-%d",
+                tokens,
+                usage_pct,
+                scene.first_post_id,
+                scene.last_post_id,
+            )
+
+            # Execute tool loop for this scene
+            try:
+                tool_stats = self._run_reader_tool_loop(messages, scene)
+            except AgentClientError as e:
+                LOGGER.error("Agent call failed, stopping run: %s", e)
+                break
+
+            # Update progress
+            self.progress.update(
+                last_post_id=scene.last_post_id,
+                last_thread_id=scene.thread_id,
+                posts_processed_delta=scene.post_count,
+                entries_created_delta=tool_stats.created,
+                entries_updated_delta=tool_stats.updated,
+            )
+
+            # Aggregate stats
+            scenes_processed += 1
+            total_posts += scene.post_count
+            total_created += tool_stats.created
+            total_updated += tool_stats.updated
+            total_deleted += tool_stats.deleted
+            total_tool_calls += tool_stats.tool_calls
+            total_inference_time += tool_stats.inference_time
+
+            # Calculate scene timing
+            scene_duration = time.time() - scene_start_time
+
+            LOGGER.info(
+                "Scene complete: %.1fs (inference: %.1fs) | %d calls, +%d/~%d",
+                scene_duration,
+                tool_stats.inference_time,
+                tool_stats.tool_calls,
+                tool_stats.created,
+                tool_stats.updated,
+            )
+
+            # Check limit
+            if limit is not None and scenes_processed >= limit:
+                LOGGER.info("Reached scene limit (%d)", limit)
+                break
+
+            # Check for graceful shutdown
+            if self._shutdown_requested:
+                LOGGER.info(
+                    "Shutdown: completed scene %d-%d, exiting",
+                    scene.first_post_id,
+                    scene.last_post_id,
+                )
+                if current_thread_id is not None:
+                    self._create_shutdown_checkpoint(
+                        current_thread_id, scene.last_post_id
+                    )
+                break
+
+        elapsed = time.time() - start_time
+        final_state = self.progress.get_state()
+
+        LOGGER.info(
+            "Run complete: %d scenes, %d posts, %d entries created, %.1fs (inference: %.1fs, %.0f%%)",
+            scenes_processed,
+            total_posts,
+            total_created,
+            elapsed,
+            total_inference_time,
+            (total_inference_time / elapsed * 100) if elapsed > 0 else 0,
+        )
+
+        # Restore original signal handlers
+        self._remove_signal_handlers()
+
+        return RunResult(
+            scenes_processed=scenes_processed,
+            posts_processed=total_posts,
+            entries_created=total_created,
+            entries_updated=total_updated,
+            entries_deleted=total_deleted,
+            tool_calls_total=total_tool_calls,
+            run_duration_seconds=elapsed,
+            final_state=final_state,
+            thread_mode=False,
+        )
+
+    def _get_glossary_context_for_scene(self, scene: Scene) -> list[GlossaryEntry]:
+        """Get glossary entries for terms that appear in this scene.
+
+        Extracts words from scene text and looks up matching glossary entries.
+        """
+        if not scene.posts:
+            return []
+
+        # Extract words from scene text
+        scene_text = " ".join(post.body or "" for post in scene.posts)
+        words = set(re.findall(r"\b[a-zA-Z]{2,}\b", scene_text))
+
+        if not words:
+            return []
+
+        # Lookup terms in glossary
+        results = self.glossary.lookup_terms(list(words))
+
+        # Return entries that were found (filter out None values)
+        return [entry for entry in results.values() if entry is not None]
+
+    def _run_reader_tool_loop(
+        self,
+        messages: list[dict],
+        scene: Scene,
+    ) -> ToolStats:
+        """Execute agent with tool calling for reader mode.
+
+        Conversation history accumulates within the scene, then resets.
+        The glossary is the persistent memory.
+        """
+        stats = ToolStats()
+        tools = self.dispatcher.get_tool_definitions(reader_mode=True)
+        current_messages = list(messages)
+
+        # Set scene index for source tracking
+        self.dispatcher.set_scene_index(scene.scene_index)
+
+        for round_num in range(self.config.max_tool_rounds):
+            stats.rounds = round_num + 1
+
+            # Call agent
+            response = self.agent.chat(
+                messages=current_messages,
+                tools=tools,
+                temperature=self.config.temperature,
+                max_tokens=self.config.max_tokens,
+            )
+
+            stats.inference_time += response.inference_duration_seconds
+            LOGGER.debug(
+                "Inference: %.2fs (round %d)",
+                response.inference_duration_seconds,
+                round_num + 1,
+            )
+
+            message = response.message
+
+            # Check for tool calls
+            tool_calls = message.get("tool_calls", [])
+
+            if not tool_calls:
+                # No tool calls - agent is done
+                content = message.get("content", "")
+                if content:
+                    current_messages.append({"role": "assistant", "content": content})
+                LOGGER.debug("Reader tool loop complete after %d rounds", stats.rounds)
+                break
+
+            # Record assistant message with tool calls
+            assistant_content = message.get("content") or ""
+            assistant_turn = {
+                "role": "assistant",
+                "content": assistant_content,
+                "tool_calls": tool_calls,
+            }
+            current_messages.append(assistant_turn)
+
+            # Dispatch each tool call
+            for tool_call in tool_calls:
+                stats.tool_calls += 1
+
+                # Create snapshot before glossary edits
+                func = tool_call.get("function", {})
+                tool_name = func.get("name", "")
+                snapshot_id = None
+                if tool_name in self.GLOSSARY_EDIT_TOOLS:
+                    snapshot_id = self._create_glossary_edit_snapshot(
+                        scene.thread_id,
+                        scene.last_post_id or 0,
+                        tool_name,
+                    )
+
+                result = self.dispatcher.dispatch(
+                    tool_call,
+                    current_post_id=scene.last_post_id or 0,
+                    current_thread_id=scene.thread_id,
+                    snapshot_id=snapshot_id,
+                )
+
+                # Track glossary modifications
+                if result.success:
+                    if result.tool_name == "glossary_upsert":
+                        # Upsert can be create or update
+                        if "created" in result.result.lower():
+                            stats.created += 1
+                        else:
+                            stats.updated += 1
+
+                # Add tool result to messages
+                tool_message = {
+                    "role": "tool",
+                    "tool_call_id": result.call_id,
+                    "content": result.result,
+                }
+                current_messages.append(tool_message)
+
+        else:
+            # Exhausted max_tool_rounds
+            LOGGER.warning(
+                "Max tool rounds (%d) exceeded for scene %d-%d",
+                self.config.max_tool_rounds,
+                scene.first_post_id,
+                scene.last_post_id,
+            )
+
+        # Reset scene index
+        self.dispatcher.set_scene_index(None)
+
+        return stats
 
     def _search_relevant_entries_for_thread(
         self, thread: ThreadContent

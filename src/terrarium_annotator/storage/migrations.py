@@ -291,6 +291,28 @@ MIGRATION_008_GLOSSARY_EDIT_SNAPSHOT_TYPE = Migration(
     ],
 )
 
+# Migration 009: Add glossary_source table for tracking reference scenes
+# Each glossary entry can have multiple source scenes that contributed to its definition
+MIGRATION_009_GLOSSARY_SOURCE = Migration(
+    version=9,
+    name="add_glossary_source_table",
+    statements=[
+        """
+        CREATE TABLE glossary_source (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entry_id INTEGER NOT NULL,
+            thread_id INTEGER NOT NULL,
+            scene_index INTEGER,
+            post_id INTEGER NOT NULL,
+            added_at TEXT NOT NULL,
+            FOREIGN KEY (entry_id) REFERENCES glossary_entry(id) ON DELETE CASCADE
+        )
+        """,
+        "CREATE INDEX idx_glossary_source_entry ON glossary_source(entry_id)",
+        "CREATE INDEX idx_glossary_source_post ON glossary_source(post_id)",
+    ],
+)
+
 # All migrations in order
 ALL_MIGRATIONS: list[Migration] = [
     MIGRATION_001_INITIAL,
@@ -301,6 +323,7 @@ ALL_MIGRATIONS: list[Migration] = [
     MIGRATION_006_COMPACTION_STATE,
     MIGRATION_007_ENTRY_TYPE,
     MIGRATION_008_GLOSSARY_EDIT_SNAPSHOT_TYPE,
+    MIGRATION_009_GLOSSARY_SOURCE,
 ]
 
 

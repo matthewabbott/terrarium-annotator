@@ -124,6 +124,59 @@ GLOSSARY_DELETE_SCHEMA: dict = {
     },
 }
 
+GLOSSARY_UPSERT_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "glossary_upsert",
+        "description": (
+            "Add or update a glossary entry. If the term already exists, "
+            "the new definition is intelligently merged with the existing one. "
+            "Use this instead of search+create to avoid duplicate errors."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "term": {
+                    "type": "string",
+                    "description": "The term to define",
+                },
+                "definition": {
+                    "type": "string",
+                    "description": "Definition or new information about the term",
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Tags for categorization (e.g., mechanic, concept, terminology)",
+                },
+            },
+            "required": ["term", "definition", "tags"],
+        },
+    },
+}
+
+GLOSSARY_LOOKUP_SCHEMA: dict = {
+    "type": "function",
+    "function": {
+        "name": "glossary_lookup",
+        "description": (
+            "Look up a specific term by exact name. "
+            "Returns the entry if it exists, or null if not found. "
+            "Faster than search when you know the exact term."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "term": {
+                    "type": "string",
+                    "description": "The exact term to look up",
+                },
+            },
+            "required": ["term"],
+        },
+    },
+}
+
 # Codex tool schemas (wiki entries for named entities)
 CODEX_SEARCH_SCHEMA: dict = {
     "type": "function",
@@ -306,6 +359,12 @@ GLOSSARY_TOOL_SCHEMAS: list[dict] = [
     GLOSSARY_DELETE_SCHEMA,
 ]
 
+# Reader mode glossary tools (simplified upsert-based workflow)
+READER_MODE_GLOSSARY_SCHEMAS: list[dict] = [
+    GLOSSARY_UPSERT_SCHEMA,
+    GLOSSARY_LOOKUP_SCHEMA,
+]
+
 # Codex-only tool schemas
 CODEX_TOOL_SCHEMAS: list[dict] = [
     CODEX_SEARCH_SCHEMA,
@@ -420,6 +479,7 @@ SweepMode = str  # "glossary" | "codex" | "both"
 def get_all_tool_schemas(
     include_snapshot_tools: bool = False,
     sweep_mode: SweepMode = "both",
+    reader_mode: bool = False,
 ) -> list[dict]:
     """Return tool schemas in OpenAI function calling format.
 
@@ -429,6 +489,7 @@ def get_all_tool_schemas(
             - "glossary": Only glossary tools (jargon/vocabulary)
             - "codex": Only codex tools (wiki entries)
             - "both": Both glossary and codex tools (default)
+        reader_mode: Use simplified reader mode tools (upsert + lookup only).
 
     Returns:
         List of tool definitions, each with 'type': 'function' and 'function'
@@ -441,13 +502,17 @@ def get_all_tool_schemas(
         - glossary_update: Update existing entry
         - glossary_delete: Delete entry with reason
 
+        Reader mode tools (simplified):
+        - glossary_upsert: Create or update entry (smart merge)
+        - glossary_lookup: Look up term by exact name
+
         Codex tools (wiki entries):
         - codex_search: Search codex by query, tags, status
         - codex_create: Create new codex entry
         - codex_update: Update existing entry
         - codex_delete: Delete entry with reason
 
-        Corpus tools (always included):
+        Corpus tools (not in reader mode):
         - read_post: Read single post by ID
         - read_thread_range: Read posts in thread range
 
@@ -458,6 +523,11 @@ def get_all_tool_schemas(
         - summon_dismiss: Dismiss active summon
     """
     schemas: list[dict] = []
+
+    if reader_mode:
+        # Reader mode: only upsert + lookup, no corpus/snapshot tools
+        schemas.extend(READER_MODE_GLOSSARY_SCHEMAS)
+        return schemas
 
     if sweep_mode in ("glossary", "both"):
         schemas.extend(GLOSSARY_TOOL_SCHEMAS)

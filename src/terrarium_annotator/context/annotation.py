@@ -163,6 +163,106 @@ class AnnotationContext:
         """
         self.conversation_history = []
 
+    def reset_for_new_scene(self) -> None:
+        """Clear conversation history for new scene (reader mode).
+
+        Called between scenes in reader mode. The glossary IS the memory,
+        so we don't accumulate conversation history across scenes.
+        """
+        self.conversation_history = []
+
+    def build_reader_messages(
+        self,
+        *,
+        current_scene: Scene,
+        story_summary: str | None = None,
+        glossary_context: list[GlossaryEntry] | None = None,
+    ) -> list[dict]:
+        """Build messages for reader mode (near-stateless scene processing).
+
+        In reader mode, each scene is processed with minimal context:
+        - Story summary (cumulative)
+        - Current scene content
+        - Glossary entries for terms appearing in this scene
+        - Conversation history (accumulates within scene, resets after)
+
+        The glossary IS the agent's persistent memory, not conversation history.
+
+        Args:
+            current_scene: Scene being processed.
+            story_summary: Cumulative summary of story so far.
+            glossary_context: Glossary entries for terms in this scene.
+
+        Returns:
+            List of message dicts ready for OpenAI chat completion API.
+        """
+        messages: list[dict] = [{"role": "system", "content": self.system_prompt}]
+
+        # Add story summary if present
+        if story_summary:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": f"<story_summary>{story_summary}</story_summary>",
+                }
+            )
+
+        # Add conversation history (accumulates within scene)
+        messages.extend(self.conversation_history)
+
+        # Build user payload with scene + glossary context
+        user_content = self._format_reader_payload(
+            current_scene,
+            glossary_context or [],
+        )
+        messages.append({"role": "user", "content": user_content})
+
+        return messages
+
+    def _format_reader_payload(
+        self,
+        scene: Scene,
+        entries: list[GlossaryEntry],
+    ) -> str:
+        """Format scene and glossary context for reader mode."""
+        lines: list[str] = []
+
+        # Current scene content
+        lines.append(
+            f'<current_scene thread="{scene.thread_id}" index="{scene.scene_index}">'
+        )
+        for post in scene.posts:
+            meta = [f'id="{post.post_id}"']
+            if post.created_at:
+                meta.append(f'ts="{post.created_at.isoformat()}"')
+            if post.author:
+                meta.append(f'author="{post.author}"')
+            attr = " ".join(meta)
+            body = (post.body or "").strip()
+            lines.append(f"<post {attr}>{body}</post>")
+        lines.append("</current_scene>")
+
+        # Glossary context - definitions for terms appearing in this scene
+        if entries:
+            lines.append("")
+            lines.append("<glossary_context>")
+            for entry in entries:
+                tags_attr = f' tags="{",".join(entry.tags)}"' if entry.tags else ""
+                status_attr = f' status="{entry.status}"'
+                lines.append(
+                    f'<entry id="{entry.id}" term="{entry.term}"{status_attr}{tags_attr}>'
+                    f"{entry.definition}</entry>"
+                )
+            lines.append("</glossary_context>")
+
+        lines.append("")
+        lines.append(
+            "<instructions>Read this scene. Notice terms with special in-story meanings. "
+            "Add or update glossary entries as needed using glossary_upsert. "
+            "Check glossary_context for existing definitions before adding.</instructions>"
+        )
+        return "\n".join(lines)
+
     def _format_previous_thread(self, posts: list[StoryPost]) -> str:
         """Format previous thread's QM posts as context window."""
         if not posts:

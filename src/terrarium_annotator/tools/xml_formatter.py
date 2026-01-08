@@ -59,7 +59,19 @@ def format_error(message: str, code: str | None = None) -> str:
     return f"<error{code_attr}>{escape(message)}</error>"
 
 
-def format_success(message: str, entry_id: int | None = None) -> str:
-    """Format success response as XML."""
-    id_attr = f' entry_id="{entry_id}"' if entry_id is not None else ""
-    return f"<success{id_attr}>{escape(message)}</success>"
+def format_success(message: str, **kwargs: str | int | bool | None) -> str:
+    """Format success response as XML.
+
+    Args:
+        message: The success message.
+        **kwargs: Additional attributes to include (entry_id, action, found, etc.)
+    """
+    attrs = []
+    for key, value in kwargs.items():
+        if value is not None:
+            if isinstance(value, bool):
+                attrs.append(f'{key}="{str(value).lower()}"')
+            else:
+                attrs.append(f'{key}="{escape(str(value))}"')
+    attr_str = " " + " ".join(attrs) if attrs else ""
+    return f"<success{attr_str}>{escape(message)}</success>"

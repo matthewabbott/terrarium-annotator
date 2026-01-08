@@ -105,6 +105,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Use legacy scene-by-scene processing instead of F11 thread mode",
     )
+    run_parser.add_argument(
+        "--reader-mode",
+        action="store_true",
+        help="Use reader mode: scene-based with glossary-as-memory (near-stateless)",
+    )
 
     # Export command
     export_parser = subparsers.add_parser("export", help="Export glossary to JSON/YAML")
@@ -695,6 +700,7 @@ def run(args: argparse.Namespace) -> None:
         from_snapshot_id=getattr(args, "from_snapshot", None),
         sweep_mode=args.sweep_mode,
         thread_mode=not getattr(args, "legacy_scene_mode", False),
+        reader_mode=getattr(args, "reader_mode", False),
     )
     runner = AnnotationRunner(config)
     try:

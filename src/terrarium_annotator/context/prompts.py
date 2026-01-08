@@ -213,16 +213,24 @@ When you have processed all significant entities, stop.
 """
 
 
-def get_system_prompt(sweep_mode: str = "both", thread_mode: bool = False) -> str:
+def get_system_prompt(
+    sweep_mode: str = "both",
+    thread_mode: bool = False,
+    reader_mode: bool = False,
+) -> str:
     """Get the appropriate system prompt for the sweep mode.
 
     Args:
         sweep_mode: "glossary", "codex", or "both"
         thread_mode: If True, use simplified thread-mode prompts (F11)
+        reader_mode: If True, use reader mode prompt (scene-based with upsert)
 
     Returns:
         System prompt string for the specified mode.
     """
+    if reader_mode:
+        return READER_MODE_PROMPT
+
     if thread_mode:
         if sweep_mode == "glossary":
             return GLOSSARY_SWEEP_PROMPT_THREAD_MODE
@@ -294,6 +302,66 @@ Create a cohesive summary that:
 4. Keeps glossary progress tracking
 
 Keep under 500 words while preserving key context."""
+
+# Reader mode prompt - scene-based with glossary as memory
+READER_MODE_PROMPT = """You are reading the Banished Quest story and building a glossary for future readers.
+
+## What Belongs in the Glossary
+
+INCLUDE only terms that would genuinely confuse a new reader:
+- Invented words: "Vys", "Zaahir", "Rhynian", "Vatis", "Writin"
+- Proper nouns needing context: "Anthus" (a city), "Soma" (the protagonist)
+- English words with SPECIFIC in-universe meanings that differ from normal usage
+
+EXCLUDE everything else:
+- Normal English words used normally (even in fantasy context)
+- Quest/game mechanics: dice rolls, votes, stats, bonuses, 4chan references
+- Mundane objects: boots, pouches, tarps, coins (unless they have special properties)
+- Actions or phrases: "spend Vys", "gather Vys" (the verb isn't the term)
+- Numeric values: "3d10", "+4 bonus", "5/14 Vys", stat displays
+
+## Consolidation: One Entry Per Concept
+
+Do NOT create separate entries for variations of the same concept:
+- "Vys" covers the magic system - don't also create "Vys energy", "Vys pool", "Vys reserves", "Vys flow"
+- "Rhynian" covers the civilization - don't also create "Rhynian artifacts", "Rhynian devices", "Rhynian relics"
+- If a term already exists, UPDATE it rather than creating a variant
+
+Before creating any entry, ask: "Does this concept already have an entry under a different name?"
+
+## Examples
+
+GOOD entries (terms that need definition):
+- "Vys" - the magic energy system unique to this world
+- "Vatis" - a practitioner rank in the magic hierarchy
+- "Zaahir" - a named character with plot significance
+- "Anthus" - a major city where events occur
+- "Grandmaster" - a specific cultivation rank (differs from normal usage)
+- "Writin" - a form of magical inscription
+
+BAD entries (do not create):
+- "immediately" - normal English word, no special meaning
+- "blue tarp" - mundane object, not special
+- "walking boots" - just boots, even if magical
+- "love" - normal word, no special in-universe meaning
+- "contribution" - normal word used normally
+- "Vys corruption" - just add corruption info to the "Vys" entry
+- "3d10", "roll", "vote", "QM" - quest mechanics, not story content
+- "4chan", "OP", "anon" - platform terms, not story content
+
+## Workflow
+
+1. Read the passage for genuinely unfamiliar terms
+2. Check <glossary_context> - is this concept already covered?
+3. If truly new AND confusing to readers: glossary_upsert
+4. If expanding existing concept: update that entry, don't create a new one
+5. When in doubt, skip it - fewer high-quality entries beat many low-quality ones
+
+Use tags: character, location, faction, mechanic, concept, item, rank
+
+When you've processed the passage, stop making tool calls.
+"""
+
 
 # Curator evaluation prompt (F6)
 CURATOR_SYSTEM_PROMPT = """You are Terra-curator, evaluating tentative glossary entries at the end of a thread.

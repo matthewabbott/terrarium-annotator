@@ -57,6 +57,9 @@ class ToolDispatcher:
             "glossary_create": (self._handle_glossary_create, True),
             "glossary_update": (self._handle_update, True),
             "glossary_delete": (self._handle_delete, True),
+            # Reader mode tools
+            "glossary_upsert": (self._handle_glossary_upsert, True),
+            "glossary_lookup": (self._handle_glossary_lookup, False),
             # Codex tools (wiki entries)
             "codex_search": (self._handle_codex_search, False),
             "codex_create": (self._handle_codex_create, True),
@@ -66,6 +69,11 @@ class ToolDispatcher:
             "read_post": (self._handle_read_post, False),
             "read_thread_range": (self._handle_read_range, False),
         }
+
+        # Merge callback for upsert operations (can be set by runner)
+        self._merge_callback: Callable[[str, str, str], str] | None = None
+        # Current scene index for source tracking (set by runner per scene)
+        self._current_scene_index: int | None = None
 
         # Add snapshot handlers if available
         if self._snapshot_tools is not None:
@@ -78,7 +86,7 @@ class ToolDispatcher:
 
     # Write tools that should be blocked during summon
     _WRITE_TOOLS = {
-        "glossary_create", "glossary_update", "glossary_delete",
+        "glossary_create", "glossary_update", "glossary_delete", "glossary_upsert",
         "codex_create", "codex_update", "codex_delete",
     }
 
@@ -198,7 +206,10 @@ class ToolDispatcher:
             )
 
     def get_tool_definitions(
-        self, sweep_mode: str = "both", thread_mode: bool = False
+        self,
+        sweep_mode: str = "both",
+        thread_mode: bool = False,
+        reader_mode: bool = False,
     ) -> list[dict]:
         """Return OpenAI function calling schemas.
 
@@ -209,19 +220,40 @@ class ToolDispatcher:
                 - "both": Both glossary and codex tools (default)
             thread_mode: If True, exclude corpus and snapshot tools (F11).
                 In thread mode, all content is provided upfront.
+            reader_mode: If True, use simplified reader mode tools.
         """
         tools = get_all_tool_schemas(
             include_snapshot_tools=self._snapshots is not None,
             sweep_mode=sweep_mode,
+            reader_mode=reader_mode,
         )
 
-        if thread_mode:
+        if thread_mode and not reader_mode:
             tools = [
                 t for t in tools
                 if t["function"]["name"] not in self._THREAD_MODE_EXCLUDED_TOOLS
             ]
 
         return tools
+
+    def set_merge_callback(
+        self, callback: Callable[[str, str, str], str] | None
+    ) -> None:
+        """Set the merge callback for upsert operations.
+
+        Args:
+            callback: Function(old_def, new_def, term) -> merged_def.
+                If None, new definition replaces old.
+        """
+        self._merge_callback = callback
+
+    def set_scene_index(self, scene_index: int | None) -> None:
+        """Set the current scene index for source tracking.
+
+        Args:
+            scene_index: Current scene index, or None if not in scene mode.
+        """
+        self._current_scene_index = scene_index
 
     @property
     def has_active_summon(self) -> bool:
@@ -347,3 +379,24 @@ class ToolDispatcher:
     def _handle_summon_dismiss(self, args: dict) -> str:
         """Handle summon_dismiss tool call."""
         return self._snapshot_tools.summon_dismiss()
+
+    # Reader mode handlers
+
+    def _handle_glossary_lookup(self, args: dict) -> str:
+        """Handle glossary_lookup tool call."""
+        return self._glossary_tools.lookup(args["term"])
+
+    def _handle_glossary_upsert(
+        self, args: dict, post_id: int, thread_id: int, snapshot_id: int | None
+    ) -> str:
+        """Handle glossary_upsert tool call."""
+        return self._glossary_tools.upsert(
+            term=args["term"],
+            definition=args["definition"],
+            tags=args.get("tags", []),
+            post_id=post_id,
+            thread_id=thread_id,
+            scene_index=self._current_scene_index,
+            snapshot_id=snapshot_id,
+            merge_callback=self._merge_callback,
+        )

@@ -504,3 +504,126 @@ class GlossaryStore:
             (entry_id,),
         )
         return [row["tag"] for row in cursor]
+
+    def lookup_terms(self, terms: list[str]) -> dict[str, GlossaryEntry | None]:
+        """
+        Batch lookup of terms by normalized name.
+
+        Args:
+            terms: List of terms to look up.
+
+        Returns:
+            Dict mapping each input term to its GlossaryEntry (or None if not found).
+        """
+        if not terms:
+            return {}
+
+        result: dict[str, GlossaryEntry | None] = {term: None for term in terms}
+        normalized_to_original: dict[str, str] = {
+            normalize_term(t): t for t in terms
+        }
+
+        try:
+            placeholders = ",".join("?" * len(normalized_to_original))
+            cursor = self.conn.execute(
+                f"""
+                SELECT id, term, term_normalized, definition, status,
+                       first_seen_post_id, first_seen_thread_id,
+                       last_updated_post_id, last_updated_thread_id,
+                       created_at, updated_at, entry_type
+                FROM glossary_entry
+                WHERE term_normalized IN ({placeholders})
+                """,
+                list(normalized_to_original.keys()),
+            )
+
+            for row in cursor:
+                normalized = row["term_normalized"]
+                original_term = normalized_to_original.get(normalized)
+                if original_term:
+                    result[original_term] = GlossaryEntry(
+                        id=row["id"],
+                        term=row["term"],
+                        term_normalized=row["term_normalized"],
+                        definition=row["definition"],
+                        status=row["status"],
+                        tags=self._get_tags(row["id"]),
+                        first_seen_post_id=row["first_seen_post_id"],
+                        first_seen_thread_id=row["first_seen_thread_id"],
+                        last_updated_post_id=row["last_updated_post_id"],
+                        last_updated_thread_id=row["last_updated_thread_id"],
+                        created_at=row["created_at"],
+                        updated_at=row["updated_at"],
+                        entry_type=row["entry_type"],
+                    )
+
+            return result
+
+        except sqlite3.Error as e:
+            raise DatabaseError(f"lookup_terms failed: {e}") from e
+
+    def add_source_scene(
+        self,
+        entry_id: int,
+        thread_id: int,
+        post_id: int,
+        scene_index: int | None = None,
+    ) -> int:
+        """
+        Record a source scene that contributed to a glossary entry.
+
+        Args:
+            entry_id: The glossary entry ID.
+            thread_id: Thread where the term was encountered.
+            post_id: Post where the term was encountered.
+            scene_index: Optional scene index within the thread.
+
+        Returns:
+            The new glossary_source row ID.
+        """
+        now = utcnow()
+        try:
+            cursor = self.conn.execute(
+                """
+                INSERT INTO glossary_source (entry_id, thread_id, scene_index, post_id, added_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (entry_id, thread_id, scene_index, post_id, now),
+            )
+            self.conn.commit()
+            return cursor.lastrowid
+        except sqlite3.Error as e:
+            raise DatabaseError(f"add_source_scene failed: {e}") from e
+
+    def get_source_scenes(self, entry_id: int) -> list[dict]:
+        """
+        Get all source scenes for a glossary entry.
+
+        Args:
+            entry_id: The glossary entry ID.
+
+        Returns:
+            List of source scene records.
+        """
+        try:
+            cursor = self.conn.execute(
+                """
+                SELECT id, thread_id, scene_index, post_id, added_at
+                FROM glossary_source
+                WHERE entry_id = ?
+                ORDER BY added_at
+                """,
+                (entry_id,),
+            )
+            return [
+                {
+                    "id": row["id"],
+                    "thread_id": row["thread_id"],
+                    "scene_index": row["scene_index"],
+                    "post_id": row["post_id"],
+                    "added_at": row["added_at"],
+                }
+                for row in cursor
+            ]
+        except sqlite3.Error as e:
+            raise DatabaseError(f"get_source_scenes failed: {e}") from e
