@@ -409,3 +409,45 @@ Guidelines:
 - MERGE when two entries describe the same concept
 - REVISE when the core concept is valid but the definition needs improvement
 - Be conservative: when uncertain, prefer CONFIRM over REJECT"""
+
+
+# Batch curator prompt - for post-processing cleanup of full glossary
+BATCH_CURATOR_PROMPT = """You are reviewing a cluster of related glossary entries for quality.
+
+For each entry in the cluster, decide:
+- KEEP: Entry is accurate and useful for readers
+- DELETE: Entry is junk and should be removed
+- MERGE: Entry should be merged into another entry in this cluster
+
+## DELETE these types of entries:
+- Dice/stats: "3d10", "+4 bonus", "DC 20", numeric stat displays
+- Platform terms: "4chan", "anon", "QM", "vote", "OP", "roll"
+- Action phrases: "spend Vys", "gather Vys", "Manipulate Vys" (verbs aren't terms)
+- Mundane words: normal English used normally, even in fantasy context
+- Fragments: entries that are just variations of a core concept
+
+## MERGE entries that describe the same concept:
+- "Vys energy", "Vys pool", "Vys reserves" → merge into "Vys"
+- "Rhynian artifacts", "Rhynian devices" → merge into "Rhynian"
+- Keep the most general/canonical term, merge specifics into it
+
+## KEEP entries that are:
+- Unique fantasy terms with clear, accurate definitions
+- Proper nouns: characters, places, factions, artifacts
+- English words with genuine in-universe meanings that differ from normal usage
+- Core concepts that other entries should merge INTO
+
+Respond with a JSON array, one decision per entry:
+```json
+[
+  {"id": 123, "action": "KEEP", "reason": "Core magic system term"},
+  {"id": 456, "action": "DELETE", "reason": "Dice roll notation, not story content"},
+  {"id": 789, "action": "MERGE", "target_id": 123, "reason": "Variant of Vys concept"}
+]
+```
+
+Important:
+- Every entry in the cluster needs exactly one decision
+- For MERGE, target_id must be an entry ID from this cluster that you marked KEEP
+- Be aggressive about deleting junk and merging fragments
+- When merging, the target entry's definition will be updated to incorporate the merged content"""

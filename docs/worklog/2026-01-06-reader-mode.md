@@ -106,13 +106,59 @@ Run v2 started with fresh database to compare.
 - Is smart merge (LLM combining definitions) worth the extra inference cost?
 - Should reader mode support codex entries too, or stay glossary-only?
 
+### Run v2 Progress (2026-01-08)
+
+After ~20 hours (63/278 threads):
+- 1,293 entries (vs 2,775 in v1 at 75 threads)
+- ~20.5 entries/thread (vs ~37 in v1) - **45% reduction**
+- Context usage: 0.7-2.8%
+
+Quality improvements:
+- Numeric junk: 12 entries (vs 86 in v1) - **86% reduction**
+- Vys variants: 48 (vs 110) - still fragmented but better
+- Rhynian variants: 33 (vs 49)
+
+Still seeing some issues:
+- Action phrases: `spend Vys`, `Manipulate Vys`
+- Some dice/stats: `3d10`, `DC 20`
+- `Anon` still got in despite explicit exclusion
+
+### Batch Curator Implementation (2026-01-08)
+
+Added post-processing batch curator for cleanup after run completes:
+
+**New components:**
+- `BATCH_CURATOR_PROMPT` - cluster-based evaluation prompt (KEEP/DELETE/MERGE)
+- `BatchCurator` class - processes entries in similarity clusters
+- `list_all()` method in GlossaryStore
+- `curate` CLI subcommand with `--dry-run` option
+
+**Clustering strategy:**
+- Group related entries using FTS search on term + definition
+- Present clusters to LLM for batch decisions
+- Handle FTS errors gracefully (special characters in terms)
+
+**Test results (20 entries, dry-run):**
+- Built 15 clusters
+- 12 kept, 5 deleted, 3 merged (25% reduction)
+
+**Usage:**
+```bash
+# Preview decisions
+python -m terrarium_annotator.cli curate --annotator-db data/annotator-reader-v2.db --dry-run
+
+# Apply cleanup
+python -m terrarium_annotator.cli curate --annotator-db data/annotator-reader-v2.db
+```
+
 ## Next Steps
 
 1. ~~Let v1 run complete and evaluate~~ → Paused after quality analysis
-2. [In Progress] Run v2 with tighter prompt, compare entry quality
-3. Consider adding cumulative story summary for narrative context
-4. Evaluate whether smart merge is needed
+2. [In Progress] Run v2 with tighter prompt
+3. [Ready] Run batch curator after v2 completes
+4. Consider adding cumulative story summary for narrative context
+5. Evaluate whether smart merge is needed
 
 ---
 *Agent: Claude Opus 4.5*
-*Sessions: 2026-01-06 (implementation), 2026-01-07 (quality analysis + prompt v2)*
+*Sessions: 2026-01-06 (implementation), 2026-01-07 (quality analysis + prompt v2), 2026-01-08 (batch curator)*

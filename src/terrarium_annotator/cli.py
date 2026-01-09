@@ -9,12 +9,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterator
 
+from terrarium_annotator.agent_client import AgentClient
+from terrarium_annotator.curator import BatchCurator
 from terrarium_annotator.exporters import JsonExporter, YamlExporter
 from terrarium_annotator.runner import AnnotationRunner, RunnerConfig
 from terrarium_annotator.storage import (
     GlossaryEntry,
     GlossaryStore,
     ProgressTracker,
+    RevisionHistory,
     SnapshotStore,
 )
 
@@ -219,6 +222,44 @@ def build_parser() -> argparse.ArgumentParser:
     # inspect thread <id>
     thread_parser = inspect_subparsers.add_parser("thread", help="View thread state")
     thread_parser.add_argument("id", type=int, help="Thread ID")
+
+    # Curate command - batch curator for post-processing
+    curate_parser = subparsers.add_parser(
+        "curate", help="Run batch curator to clean up glossary"
+    )
+    curate_parser.add_argument(
+        "--annotator-db",
+        default="data/annotator.db",
+        help="Path to annotator database (default: data/annotator.db)",
+    )
+    curate_parser.add_argument(
+        "--agent-url",
+        default="http://localhost:8080",
+        help="Terrarium-agent base URL",
+    )
+    curate_parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Limit number of entries to process (for testing)",
+    )
+    curate_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show decisions without applying changes",
+    )
+    curate_parser.add_argument(
+        "--cluster-size",
+        type=int,
+        default=10,
+        help="Maximum entries per cluster (default: 10)",
+    )
+    curate_parser.add_argument(
+        "--log-file",
+        type=str,
+        default=None,
+        help="Log to file in addition to stderr",
+    )
 
     return parser
 
@@ -686,6 +727,55 @@ def inspect_thread(args: argparse.Namespace, db_path: Path) -> None:
         snapshots.close()
 
 
+def curate(args: argparse.Namespace) -> None:
+    """Run batch curator to clean up glossary."""
+    db_path = Path(args.annotator_db)
+    if not db_path.exists():
+        print(f"Error: Database not found: {db_path}")
+        return
+
+    # Initialize components
+    glossary = GlossaryStore(db_path)
+    revisions = RevisionHistory(db_path)
+    agent = AgentClient(base_url=args.agent_url)
+
+    # Check agent health
+    if not agent.health_check():
+        print(f"Error: Agent not available at {args.agent_url}")
+        glossary.close()
+        revisions.close()
+        return
+
+    try:
+        curator = BatchCurator(
+            glossary=glossary,
+            revisions=revisions,
+            agent=agent,
+            dry_run=args.dry_run,
+            cluster_size=args.cluster_size,
+        )
+
+        print(f"Starting batch curator (dry_run={args.dry_run})")
+        result = curator.run(limit=args.limit)
+
+        print()
+        print("Batch Curator Results")
+        print("=" * 40)
+        print(f"Entries evaluated: {result.entries_evaluated}")
+        print(f"Clusters processed: {result.clusters_processed}")
+        print(f"Kept:    {result.kept}")
+        print(f"Deleted: {result.deleted}")
+        print(f"Merged:  {result.merged}")
+
+        if args.dry_run:
+            print()
+            print("(dry-run mode - no changes applied)")
+
+    finally:
+        glossary.close()
+        revisions.close()
+
+
 def run(args: argparse.Namespace) -> None:
     config = RunnerConfig(
         corpus_db_path=Path(args.corpus_db),
@@ -725,8 +815,8 @@ def main() -> None:
     log_format = "%(asctime)s %(levelname)s %(name)s: %(message)s"
     handlers: list[logging.Handler] = [logging.StreamHandler()]
 
-    # Add file handler if --log-file specified (only for run command)
-    if args.command == "run" and getattr(args, "log_file", None):
+    # Add file handler if --log-file specified (for run and curate commands)
+    if args.command in ("run", "curate") and getattr(args, "log_file", None):
         file_handler = logging.FileHandler(args.log_file)
         file_handler.setFormatter(logging.Formatter(log_format))
         handlers.append(file_handler)
@@ -745,6 +835,8 @@ def main() -> None:
         status(args)
     elif args.command == "inspect":
         inspect(args)
+    elif args.command == "curate":
+        curate(args)
     else:
         parser.error(f"Unknown command {args.command}")
 

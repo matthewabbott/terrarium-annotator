@@ -497,6 +497,64 @@ class GlossaryStore:
         except sqlite3.Error as e:
             raise DatabaseError(f"get_tentative_by_thread failed: {e}") from e
 
+    def list_all(self, entry_type: EntryType | None = None) -> list[GlossaryEntry]:
+        """
+        Get all glossary entries.
+
+        Args:
+            entry_type: Optional filter by entry type ("glossary" or "codex").
+
+        Returns:
+            List of all entries, ordered by term.
+        """
+        try:
+            if entry_type:
+                cursor = self.conn.execute(
+                    """
+                    SELECT id, term, term_normalized, definition, status,
+                           first_seen_post_id, first_seen_thread_id,
+                           last_updated_post_id, last_updated_thread_id,
+                           created_at, updated_at, entry_type
+                    FROM glossary_entry
+                    WHERE entry_type = ?
+                    ORDER BY term_normalized
+                    """,
+                    (entry_type,),
+                )
+            else:
+                cursor = self.conn.execute(
+                    """
+                    SELECT id, term, term_normalized, definition, status,
+                           first_seen_post_id, first_seen_thread_id,
+                           last_updated_post_id, last_updated_thread_id,
+                           created_at, updated_at, entry_type
+                    FROM glossary_entry
+                    ORDER BY term_normalized
+                    """
+                )
+            entries = []
+            for row in cursor:
+                entries.append(
+                    GlossaryEntry(
+                        id=row["id"],
+                        term=row["term"],
+                        term_normalized=row["term_normalized"],
+                        definition=row["definition"],
+                        status=row["status"],
+                        tags=self._get_tags(row["id"]),
+                        first_seen_post_id=row["first_seen_post_id"],
+                        first_seen_thread_id=row["first_seen_thread_id"],
+                        last_updated_post_id=row["last_updated_post_id"],
+                        last_updated_thread_id=row["last_updated_thread_id"],
+                        created_at=row["created_at"],
+                        updated_at=row["updated_at"],
+                        entry_type=row["entry_type"],
+                    )
+                )
+            return entries
+        except sqlite3.Error as e:
+            raise DatabaseError(f"list_all failed: {e}") from e
+
     def _get_tags(self, entry_id: int) -> list[str]:
         """Fetch tags for an entry."""
         cursor = self.conn.execute(
