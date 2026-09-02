@@ -20,6 +20,7 @@ Guiding principle for v2: **the glossary is the memory; the story digest is the 
 - **Age-decaying cover** (`cover(T, budget)`): at wake, tile history with aligned power-of-two blocks, keeping blocks whole iff `size ≤ α × age`. Recent memories stay verbatim; ancient ones collapse to one line. `WAKE_LINES` (default 96 ≈ 8k tokens) is a pure *reading* budget — resizeable in either direction with zero recomputation.
 - **Retrieval is regex over the raw log** (`recall`), plus tree navigation (`zoom`). No embeddings.
 - TREE/ is a cache, fully rebuildable from LOG.txt. Crash safety via partial-record truncation and a file lock.
+- **Merge mechanics** (verified in source): `nap` settles the smallest pending block first — blocks of ≤16 memories compress from raw log lines, larger blocks from their two halves' summaries — with the prompt "Keep what has lasting effect, drop what does not. Invent nothing." Blocks settle strictly in order. `wake` refuses to render if a needed summary is missing and prints exactly the merge to do first. `forget` truncates a block and everything built on it; the log is never touched, so any summary is rebuildable.
 
 ### Verdict: adopt the algorithm, not the tool
 
@@ -113,7 +114,7 @@ source = { thread_id, post_id, scene_index, quote, pass_id, added_at }
 - **Blame and retraction**: `pass_id` identifies the reading pass/prompt version that produced an entry. Bad prompt? Delete by `pass_id`. Non-canon thread? Delete by thread.
 - Wiki generation (future) reads these directly: every entry page links its source threads/posts; `[[Term]]` cross-refs resolve against the canonical term table.
 
-Corpus-side grounding: `banished.db` is immutable — `post(id, thread_id, body, time)`, `tag(post_id, name)`, `thread(id, title)`. Tags: `story_post` (9,813 distinct posts — the QM's actual story updates; every `story_post` also carries `qm_post`), `qm_post` (12,757 — superset including QM meta/vote chatter), `op_post` (276 threads). v1 read `qm_post`; v2 reads `story_post` by default. **The DB is currently irreplaceable** (source server 502s) — read-only access, and keep a backup off this repo. Quotes are re-verifiable offline, forever.
+Corpus-side grounding: `banished.db` is immutable — `post(id, thread_id, body, time)`, `tag(post_id, name)`, `thread(id, title)`. Tags (distinct posts): `story_post` 9,813 (the QM's actual story updates; a strict subset of `qm_post`), `qm_post` 12,721 (adds 2,908 posts of QM meta/vote chatter), `op_post` 276 threads. (Tag rows are slightly higher — a few dozen posts are double-tagged.) v1 read `qm_post`; **v2's read predicate defaults to `story_post` and is a config knob**, so meta-heavy passes remain possible. **The DB is currently irreplaceable** (source server 502s) — read-only access, and keep a backup off this repo. Quotes are re-verifiable offline, forever.
 
 ### Blame: git-history for glossary entries
 
@@ -134,7 +135,7 @@ context(P) = system prompt (versioned by pass_id)
 
 For this to work, three stores must be replayable: `story_log` (append-only ✓), `story_tree` (**write-once**: nodes are never rewritten; a `forget`-style rebuild bumps `tree_version`, recorded on each revision), and `revision` (append-only ✓). One thing inputs alone can't reconstruct is the agent's *reasoning*, so the harness also appends a per-scene **`transcript`** (agent messages + tool calls, a few KB per scene) — cheap because v2 context is budget-bounded, unlike v1's accumulating 100K-token conversations.
 
-"Talk to the annotator that made edit E" = host-side command (not an agent tool): reconstruct `context(E)`, replay the transcript up to E, then continue a **read-only** dialogue (tools restricted to fetch/recall; no glossary writes). Fallback if reconstruction ever proves fragile: materialize snapshots at thread boundaries only — small in v2, since context is budget-bounded.
+"Talk to the annotator that made edit E" = host-side command (not an agent tool): reconstruct `context(E)`, replay the transcript up to E — **replayed tool calls are rendered as recorded messages/results, never re-executed**; only the new interrogation turn gets live tools, and those are read-only (fetch/recall; no glossary writes). Fallback if reconstruction ever proves fragile: materialize snapshots at thread boundaries only — small in v2, since context is budget-bounded.
 
 ---
 
