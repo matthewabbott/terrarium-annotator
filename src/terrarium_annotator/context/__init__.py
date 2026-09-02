@@ -19,9 +19,6 @@ from terrarium_annotator.context.prompts import (
 from terrarium_annotator.context.summarizer import SummaryResult, ThreadSummarizer
 from terrarium_annotator.context.token_counter import TokenCounter
 
-# Alias for backwards compatibility with tests
-NewAnnotationContext = AnnotationContext
-
 __all__ = [
     "AnnotationContext",
     "ChunkSummary",
@@ -33,7 +30,6 @@ __all__ = [
     "ContextMetrics",
     "CUMULATIVE_SUMMARY_PROMPT",
     "get_system_prompt",
-    "NewAnnotationContext",  # Alias for backwards compatibility
     "SummaryResult",
     "SYSTEM_PROMPT",
     "THREAD_SUMMARY_PROMPT",

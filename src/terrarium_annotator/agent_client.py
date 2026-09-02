@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from typing import Dict, List, Optional
 
 import requests
 from requests import Response
@@ -22,8 +21,8 @@ class AgentClientError(Exception):
 class AgentResponse:
     """Container for agent responses."""
 
-    message: Dict
-    raw: Dict
+    message: dict
+    raw: dict
     inference_duration_seconds: float = 0.0
 
 
@@ -35,7 +34,7 @@ class AgentClient:
         base_url: str = "http://localhost:8080",
         timeout: int = 60,
         max_retries: int = 3,
-        session: Optional[requests.Session] = None,
+        session: requests.Session | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
@@ -44,15 +43,15 @@ class AgentClient:
 
     def chat(
         self,
-        messages: List[Dict[str, str]],
+        messages: list[dict[str, str]],
         temperature: float = 0.4,
         max_tokens: int = 768,
-        model: Optional[str] = None,
-        tools: Optional[List[Dict]] = None,
+        model: str | None = None,
+        tools: list[dict] | None = None,
     ) -> AgentResponse:
         """Call `/v1/chat/completions` and return the first choice."""
 
-        payload: Dict[str, object] = {
+        payload: dict[str, object] = {
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
@@ -85,7 +84,7 @@ class AgentClient:
         except RequestException:
             return False
 
-    def get_metrics(self) -> Dict:
+    def get_metrics(self) -> dict:
         """
         Fetch metrics from the agent server.
 
@@ -104,7 +103,7 @@ class AgentClient:
             pass
         return {}
 
-    def tokenize(self, text: str) -> List[int]:
+    def tokenize(self, text: str) -> list[int]:
         """
         Get token IDs for text.
 
@@ -116,7 +115,7 @@ class AgentClient:
         except KeyError as exc:
             raise AgentClientError(f"Malformed tokenize response: {exc}")
 
-    def _request_with_retry(self, method: str, endpoint: str, **kwargs) -> Dict:
+    def _request_with_retry(self, method: str, endpoint: str, **kwargs) -> dict:
         url = f"{self.base_url}{endpoint}"
         start_time = time.time()
         last_error: str | None = None

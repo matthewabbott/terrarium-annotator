@@ -8,12 +8,9 @@ import pytest
 from terrarium_annotator.storage import (
     Database,
     DuplicateTermError,
-    GlossaryEntry,
     GlossaryStore,
     ProgressTracker,
-    Revision,
     RevisionHistory,
-    RunState,
     get_all_migrations,
     normalize_term,
 )
@@ -328,7 +325,7 @@ class TestRevisionHistory:
         )
 
         history = RevisionHistory(temp_db)
-        rev_id = history.log_deletion(entry_id=entry_id, reason="Duplicate entry")
+        history.log_deletion(entry_id=entry_id, reason="Duplicate entry")
 
         revisions = history.get_history(entry_id)
         assert len(revisions) == 1

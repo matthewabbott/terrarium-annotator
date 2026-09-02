@@ -5,7 +5,7 @@ from unittest.mock import Mock
 import pytest
 
 from terrarium_annotator.context import (
-    NewAnnotationContext,
+    AnnotationContext,
     SYSTEM_PROMPT,
     ThreadSummary,
     TokenCounter,
@@ -150,7 +150,7 @@ class TestThreadSummary:
 
 
 class TestAnnotationContext:
-    """NewAnnotationContext tests."""
+    """AnnotationContext tests."""
 
     @pytest.fixture
     def sample_scene(self) -> Scene:
@@ -189,7 +189,7 @@ class TestAnnotationContext:
         )
 
     def test_build_messages_includes_system_prompt(self, sample_scene):
-        ctx = NewAnnotationContext(system_prompt="Be an annotator.")
+        ctx = AnnotationContext(system_prompt="Be an annotator.")
 
         messages = ctx.build_messages(current_scene=sample_scene)
 
@@ -197,7 +197,7 @@ class TestAnnotationContext:
         assert messages[0]["content"] == "Be an annotator."
 
     def test_build_messages_includes_scene_posts(self, sample_scene):
-        ctx = NewAnnotationContext(system_prompt="Annotate.")
+        ctx = AnnotationContext(system_prompt="Annotate.")
 
         messages = ctx.build_messages(current_scene=sample_scene)
 
@@ -207,7 +207,7 @@ class TestAnnotationContext:
         assert "The warrior drew his sword." in user_msg
 
     def test_build_messages_includes_entries(self, sample_scene, sample_entry):
-        ctx = NewAnnotationContext(system_prompt="Annotate.")
+        ctx = AnnotationContext(system_prompt="Annotate.")
 
         messages = ctx.build_messages(
             current_scene=sample_scene,
@@ -220,7 +220,7 @@ class TestAnnotationContext:
         assert 'tags="character"' in user_msg
 
     def test_build_messages_includes_cumulative_summary(self, sample_scene):
-        ctx = NewAnnotationContext(system_prompt="Annotate.")
+        ctx = AnnotationContext(system_prompt="Annotate.")
 
         messages = ctx.build_messages(
             current_scene=sample_scene,
@@ -231,7 +231,7 @@ class TestAnnotationContext:
         assert any("<cumulative_summary>" in m.get("content", "") for m in messages)
 
     def test_build_messages_includes_thread_summaries(self, sample_scene):
-        ctx = NewAnnotationContext(system_prompt="Annotate.")
+        ctx = AnnotationContext(system_prompt="Annotate.")
         summaries = [
             ThreadSummary(
                 thread_id=1, position=0, summary_text="First thread summary."
@@ -251,14 +251,14 @@ class TestAnnotationContext:
         assert any('id="1"' in m.get("content", "") for m in messages)
 
     def test_record_turn_user(self):
-        ctx = NewAnnotationContext(system_prompt="Test")
+        ctx = AnnotationContext(system_prompt="Test")
 
         ctx.record_turn("user", "Hello")
 
         assert ctx.conversation_history == [{"role": "user", "content": "Hello"}]
 
     def test_record_turn_assistant(self):
-        ctx = NewAnnotationContext(system_prompt="Test")
+        ctx = AnnotationContext(system_prompt="Test")
 
         ctx.record_turn("assistant", "Hi there!")
 
@@ -267,7 +267,7 @@ class TestAnnotationContext:
         ]
 
     def test_record_turn_tool_with_id(self):
-        ctx = NewAnnotationContext(system_prompt="Test")
+        ctx = AnnotationContext(system_prompt="Test")
 
         ctx.record_turn("tool", "Result", tool_call_id="call_123")
 
@@ -276,7 +276,7 @@ class TestAnnotationContext:
         ]
 
     def test_get_history_returns_copy(self):
-        ctx = NewAnnotationContext(system_prompt="Test")
+        ctx = AnnotationContext(system_prompt="Test")
         ctx.record_turn("user", "Hi")
 
         history = ctx.get_history()
@@ -286,7 +286,7 @@ class TestAnnotationContext:
         assert len(ctx.conversation_history) == 1
 
     def test_clone_creates_independent_copy(self):
-        ctx = NewAnnotationContext(system_prompt="Test")
+        ctx = AnnotationContext(system_prompt="Test")
         ctx.record_turn("user", "Original")
 
         clone = ctx.clone()
@@ -297,7 +297,7 @@ class TestAnnotationContext:
         assert clone.system_prompt == "Test"
 
     def test_clone_deep_copies_history(self):
-        ctx = NewAnnotationContext(system_prompt="Test")
+        ctx = AnnotationContext(system_prompt="Test")
         ctx.conversation_history = [
             {"role": "user", "content": "Hi", "metadata": {"key": "value"}}
         ]
@@ -310,7 +310,7 @@ class TestAnnotationContext:
 
     def test_build_messages_without_scene(self):
         """Should work without a scene (no user message added)."""
-        ctx = NewAnnotationContext(system_prompt="Test")
+        ctx = AnnotationContext(system_prompt="Test")
         ctx.record_turn("user", "Previous message")
 
         messages = ctx.build_messages()
@@ -322,7 +322,7 @@ class TestAnnotationContext:
 
     def test_build_messages_includes_detected_terms(self, sample_scene):
         """Should include detected_terms_xml in user payload."""
-        ctx = NewAnnotationContext(system_prompt="Annotate.")
+        ctx = AnnotationContext(system_prompt="Annotate.")
         detected_xml = "<detected_terms><novel>Vys, Zaahir</novel></detected_terms>"
 
         messages = ctx.build_messages(
@@ -338,7 +338,7 @@ class TestAnnotationContext:
         self, sample_scene, sample_entry
     ):
         """Detected terms should appear between story_passages and known_glossary."""
-        ctx = NewAnnotationContext(system_prompt="Annotate.")
+        ctx = AnnotationContext(system_prompt="Annotate.")
         detected_xml = "<detected_terms><novel>Rhynia</novel></detected_terms>"
 
         messages = ctx.build_messages(

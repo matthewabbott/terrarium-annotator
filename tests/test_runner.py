@@ -1,7 +1,7 @@
 """Tests for the annotation runner."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -149,7 +149,7 @@ class TestAnnotationRunner:
     def test_init_creates_components(self, mock_components):
         """Runner initializes all required components."""
         config = mock_components["config"]
-        runner = AnnotationRunner(config)
+        AnnotationRunner(config)
 
         # Verify storage components created
         mock_components["glossary"].assert_called_once_with(config.annotator_db_path)

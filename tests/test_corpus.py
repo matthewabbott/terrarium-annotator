@@ -163,24 +163,6 @@ class TestCorpusReader:
         for post in posts:
             assert post.has_tag("qm_post")
 
-    def test_iter_posts_backwards_compat(self, corpus: CorpusReader):
-        # Create reader with old-style parameters
-        reader = CorpusReader(CORPUS_DB, tag_filter="qm_post", chunk_size=5)
-
-        batches = []
-        for batch in reader.iter_posts(limit=15):
-            batches.append(batch)
-            assert isinstance(batch, list)
-            assert all(isinstance(p, StoryPost) for p in batch)
-
-        reader.close()
-
-        # Should have gotten batches
-        assert len(batches) > 0
-        # Each batch should be <= chunk_size
-        for batch in batches:
-            assert len(batch) <= 5
-
 
 class TestSceneBatcher:
     def test_iter_scenes_yields_scenes(self, batcher: SceneBatcher):

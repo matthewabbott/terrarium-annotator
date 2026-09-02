@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Generator, Iterator
+from typing import Iterator
 
 from terrarium_annotator.corpus.models import StoryPost, Thread
 
@@ -18,19 +18,16 @@ class CorpusReader:
         db_path: Path | str,
         *,
         tag_filter: str | None = None,
-        chunk_size: int = 1,
     ) -> None:
         """
         Connect to corpus database.
 
         Args:
             db_path: Path to banished.db
-            tag_filter: Optional tag to filter posts (for backwards compat)
-            chunk_size: Batch size for iter_posts (for backwards compat)
+            tag_filter: Optional tag to filter posts
         """
         self.db_path = Path(db_path)
         self._tag_filter = tag_filter
-        self._chunk_size = chunk_size
         self._conn: sqlite3.Connection | None = None
 
     @property
@@ -291,37 +288,6 @@ class CorpusReader:
                 created_at=self._parse_unix_timestamp(row["time"]),
                 tags=tags,
             )
-
-    def iter_posts(
-        self,
-        start_after_id: int | None = None,
-        limit: int | None = None,
-    ) -> Generator[list[StoryPost], None, None]:
-        """
-        Yield batches of posts (backwards compatibility).
-
-        This method exists for compatibility with the old API.
-        New code should use iter_all_posts() instead.
-        """
-        batch: list[StoryPost] = []
-        count = 0
-
-        for post in self.iter_all_posts(
-            start_after_post_id=start_after_id,
-            tag_filter=self._tag_filter,
-        ):
-            batch.append(post)
-            count += 1
-
-            if len(batch) >= self._chunk_size:
-                yield batch
-                batch = []
-
-            if limit and count >= limit:
-                break
-
-        if batch:
-            yield batch
 
     def _get_tags(self, post_id: int) -> list[str]:
         """Fetch all tags for a post."""

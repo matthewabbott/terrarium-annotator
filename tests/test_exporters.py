@@ -10,7 +10,7 @@ import pytest
 import yaml
 
 from terrarium_annotator.exporters import JsonExporter, YamlExporter
-from terrarium_annotator.storage import GlossaryEntry, GlossaryStore
+from terrarium_annotator.storage import GlossaryStore
 
 
 @pytest.fixture
