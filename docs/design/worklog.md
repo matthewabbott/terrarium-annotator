@@ -39,3 +39,18 @@
 - Attempted to dispatch via Codex CLI first — failed with 401 (no OpenAI API key configured on this machine)
 - Claude Code CLI launched but spent 25+ minutes without producing output (likely stuck in read-loop or rate-limited) — killed and wrote doc directly
 - The terrarium-annotator codebase is well-structured; the context/ package is cleanly separated from storage/ and tools/
+
+## 2026-09-02
+
+### Session: v2 cutover — research synthesis + new architecture
+
+**Author**: omp agent session with Matt
+
+#### What
+- Commissioned web research on rolling memory, two-tier retrieval, provenance, and glossary evaluation → `research-memory-rag.md`
+- Assessed OptMem by reading the `memo` source: adopt the algorithm (append-only log, lazy merge tree, budgeted age-decaying cover), reimplement in-process, align merges to thread boundaries, keep glossary cards outside the decaying tree
+- Wrote `v2-architecture.md` — the load-bearing design doc for the rebuild
+- v1 code/docs deleted; details in `docs/worklog/2026-09-02-v2-cutover.md`
+
+#### Supersedes
+`context-improvements.md` was written for the v1 codebase (its file references are gone). Its semantic-retrieval and eval-framework ideas are absorbed into `v2-architecture.md` §3/§6 with one change: embeddings move off the read path (audit-only for duplicate detection) because small models can't be trusted with self-managed retrieval.

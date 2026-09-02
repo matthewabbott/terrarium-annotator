@@ -1,116 +1,34 @@
 # Terrarium Annotator
 
-An always-on harness that walks the Banished Quest corpus, calls the local `terrarium-agent` server, and curates a glossary of people, places, items, and mechanics. The agent maintains a rolling conversation history with tool-based glossary updates so later passages inherit consistent terminology.
+An LLM harness that reads the Banished Quest corpus and builds a glossary/lorebook of setting-specific terms, characters, and places — every entry grounded in verifiable quotes from the source text. The long-term goal is wiki generation and semantic search over the story's lore.
 
-## Architecture
+## Status
 
-```
-banished.db (read-only)     annotator.db (read-write)
-      │                            │
-      ▼                            ▼
-┌─────────────┐            ┌─────────────────┐
-│CorpusReader │            │  GlossaryStore  │ ◄── FTS5 search
-│ SceneBatcher│            │ RevisionHistory │ ◄── audit trail
-└─────────────┘            │ ProgressTracker │ ◄── run state
-      │                    └─────────────────┘
-      ▼                            │
-┌─────────────────────────────────────────────┐
-│              ToolDispatcher                 │
-│  glossary_search | glossary_create          │
-│  glossary_update | glossary_delete          │
-│  read_post      | read_thread_range         │
-└─────────────────────────────────────────────┘
-      │
-      ▼
-┌─────────────────────────────────────────────┐
-│           AnnotationContext                 │
-│  system_prompt + conversation_history       │
-│  → OpenAI message format                    │
-└─────────────────────────────────────────────┘
-      │
-      ▼
-┌─────────────────────────────────────────────┐
-│              AgentClient                    │
-│  POST /v1/chat/completions                  │
-└─────────────────────────────────────────────┘
-```
+**v2 clean-slate phase.** The v1 harness (tool-loop runner, tiered compaction, snapshots, curator) was removed in September 2026 after two persistent failure modes: overzealous term extraction by local models, and context-management machinery heavier than the task. Git history preserves v1 in full; its glossary output survives as `data/exports/glossary-v2-full.json` (3,623 entries with provenance) as an evaluation baseline.
 
-## How it Works
+Current work: implementing the v2 design.
 
-1. **CorpusReader** streams posts from `banished.db` (read-only corpus).
-2. **SceneBatcher** groups contiguous `qm_post`-tagged posts into scenes.
-3. **AnnotationContext** builds OpenAI-format messages with system prompt, summaries, and conversation history.
-4. **AgentClient** calls `http://localhost:8080/v1/chat/completions`.
-5. **ToolDispatcher** routes tool calls to glossary/corpus operations.
-6. **GlossaryStore** persists entries to `annotator.db` with FTS5 search.
-7. **RevisionHistory** logs all glossary changes for audit trail.
-8. **ProgressTracker** saves run state for automatic resumption.
+## Design in one paragraph
 
-## Quick Start
+The agent reads the corpus scene by scene. Persistent state is exactly two things: a **two-tier glossary** (short standalone *cards* auto-injected on keyword trigger within a hard token budget; full wiki-style *pages* with backlinks pulled on demand) and a **story digest** (append-only log of scene gists compressed by a lazy binary merge tree, giving fixed-budget continuity). Every glossary write requires a verbatim, mechanically verified quote from the corpus. See `SPEC.md` and `docs/design/v2-architecture.md`.
+
+## Layout
+
+| Path | Contents |
+|------|----------|
+| `banished.db` | Read-only corpus (276 threads, ~13k story/QM posts). Never modify. |
+| `SPEC.md` | v2 specification |
+| `docs/design/` | v2 architecture, research findings, design worklog |
+| `docs/worklog/` | Session logs |
+| `data/` | Gitignored run artifacts; `data/exports/` holds the v1 glossary baseline |
+| `src/terrarium_annotator/` | (to be built) |
+| `tests/` | (to be built) |
+
+## Development
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-
-# Ensure terrarium-agent server is running on localhost:8080
-python -m terrarium_annotator.cli run --db banished.db
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e '.[dev]'
+python -m pytest tests -q
+ruff check src tests
 ```
-
-Useful flags:
-- `--limit 50` - annotate only the next 50 posts
-- `--no-resume` - restart from the first post
-- `--agent-url http://localhost:8081` - use a different agent endpoint
-
-## Storage
-
-| Database | Purpose |
-|----------|---------|
-| `banished.db` | Corpus (read-only) - forum posts, threads, tags |
-| `annotator.db` | Glossary, revisions, snapshots, run state (read-write) |
-
-The annotator database uses SQLite with:
-- **FTS5** full-text search for glossary terms
-- **Migrations** for schema versioning
-- **Foreign keys** for referential integrity
-
-## Available Tools
-
-The agent can call these tools via OpenAI function calling:
-
-| Tool | Description |
-|------|-------------|
-| `glossary_search` | Search glossary by query, tags, status |
-| `glossary_create` | Create new glossary entry |
-| `glossary_update` | Update existing entry |
-| `glossary_delete` | Delete entry with reason |
-| `read_post` | Read a single post by ID |
-| `read_thread_range` | Read posts in a thread range |
-| `list_snapshots` | List available snapshots |
-| `summon_snapshot` | Load read-only historical view |
-| `summon_continue` | Continue summon conversation |
-| `summon_dismiss` | End summon session |
-
-## Current Status
-
-See `docs/ROADMAP.md` for feature status.
-
-- [x] F0: SQLite storage layer with FTS5
-- [x] F1: Scene-aware corpus batching
-- [x] F2: Token counting and context management
-- [x] F3: Tool dispatcher and implementations
-- [x] F3.5: Documentation and basic logging
-- [x] F4: Runner MVP with scene-based iteration
-- [x] F5: Context compaction and summarization
-- [x] F6: Curator workflow (end-of-thread evaluation)
-- [x] F7: Snapshots (checkpoint + summon)
-- [x] F7.5: Integration tests (agent auto-detection)
-- [ ] F8: Exporters
-
-## Documentation
-
-- `docs/SPEC.md` - System specification
-- `docs/INTERFACES.md` - Class interfaces and contracts
-- `docs/SCHEMA.md` - Database schema
-- `docs/ARCHITECTURE.md` - System architecture
-- `docs/ROADMAP.md` - Feature roadmap and status

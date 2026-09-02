@@ -1,193 +1,41 @@
-# terrarium-annotator Specification
+# terrarium-annotator Specification (v2)
 
-LLM-driven corpus annotation system for constructing glossaries of domain-specific terminology.
+LLM harness that reads a fiction corpus sequentially and builds a glossary/wiki of setting-specific terminology, characters, and places — with every entry grounded in verifiable source quotes. Primary corpus: Banished Quest (`banished.db`). Design permits future corpora.
 
-## 1. Purpose
+**v2 is a clean-slate rewrite.** v1 code, schema, and docs were removed 2026-09-02 (git history preserves them). The v1 glossary output survives as `data/exports/glossary-v2-full.json` (3,623 entries) for use as an evaluation baseline.
 
-Iteratively read a corpus via local LLM (Qwen3-Next-80B on vLLM via terrarium-agent), identify non-standard terms, and build a structured glossary with provenance tracking. Primary corpus: Banished Quest (fantasy forum story). Design permits future corpus adaptation.
+## Core ideas
 
-## 2. Glossary Entry Schema
+1. **The glossary is the memory.** Persistent knowledge lives in structured entries, not conversation history. Conversation resets between scenes.
+2. **The story digest is continuity.** An append-only log of per-scene gists, compressed by a lazy, thread-aligned binary merge tree (OptMem's algorithm, reimplemented in-process), yields a fixed-budget digest: recent scenes verbatim, old ones as coarse summaries. See `docs/design/v2-architecture.md` §1–2.
+3. **The corpus is ground truth.** Every entry and every definition revision requires a verbatim quote from a cited post, mechanically verified at write time. Backlinks `(thread_id, post_id, quote)` are structured data and feed future wiki generation.
 
-### 2.1 Core Fields
+4. **History is recomputed, not snapshotted.** Revisions, story log, and per-scene transcripts are append-only, so the exact context the annotator had at any edit can be reconstructed — enabling blame ("where in the story was this written") and rehydration (interrogating a past annotator about its reasoning) without v1's 31.9GB snapshot store. See `docs/design/v2-architecture.md` §4.
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `id` | INTEGER | Auto-increment PK |
-| `term` | TEXT | Display name with disambiguation suffix if needed: `Dawn (character)` |
-| `term_normalized` | TEXT | Lowercase for lookups |
-| `definition` | TEXT | Markdown. Cross-refs via `[[Term]]` syntax |
-| `status` | TEXT | `confirmed` \| `tentative` |
-| `tags` | TEXT[] | Free-form: `character`, `location`, `mechanic`, `faction`, etc. |
-| `first_seen_post_id` | INTEGER | Source post where term first identified |
-| `first_seen_thread_id` | INTEGER | Thread context |
-| `last_updated_post_id` | INTEGER | Most recent modification source |
-| `last_updated_thread_id` | INTEGER | Thread context |
-| `created_at` | TEXT | ISO8601 |
-| `updated_at` | TEXT | ISO8601 |
+## Glossary: two tiers
 
-### 2.2 Disambiguation
+- **Tier 1 — card**: term, trigger keys/aliases, 1–2 sentence standalone gloss, tags. Auto-injected when a key matches the current scene; hard token budget (~15% of context); scan depth 1; recursion ≤1.
+- **Tier 2 — page**: full markdown body with `[[Term]]` cross-refs, backlink list, append-only revision history. Pulled on demand via `fetch_entry`; the read path never *depends* on the pull.
 
-Homographs get separate entries: `Dawn (character)` vs `dawn (time)`. Agent classifies on encounter. Disambiguation suffix in parentheses is convention, not enforced.
+Definitions are versioned, never overwritten. Duplicate merges union evidence. Deletion is a human/audit action, not an agent tool.
 
-### 2.3 Cross-References
+## Agent tools
 
-Use `[[Term Name]]` in definition text. Parsed post-hoc for wiki generation. Not validated at write time.
+`propose_entry`, `update_entry`, `add_alias` (all quote-gated), `fetch_entry`, `fetch_post`, `fetch_thread_range`, `recall_story`. Full list with guards: `docs/design/v2-architecture.md` §5.
 
-### 2.4 Versioning
+## Verification
 
-Entries overwritten in place. Revision history stored in separate `revision` table for human audit. Model does NOT see revision history.
+Hard dashboard after every pass (provenance coverage, quote validity, dangling links, injected-token share ≤ budget, trigger-utility simulation, duplicate-cluster queue); soft evals on a fixed gold range (term-selection P/R/F1, faithfulness ≥0.85, comprehension QA). Details and rationale: `docs/design/v2-architecture.md` §6, evidence base in `docs/design/research-memory-rag.md` §4.
 
-### 2.5 Tentative Entries
+## Storage
 
-New entries default to `tentative`. Promoted to `confirmed` by:
-- Curator fork semantic judgment
-- Agent explicit confirmation
-- Human override
+- `banished.db` — corpus, **read-only, never modify** (currently irreplaceable: source server 502s). `post(id, thread_id, body, time)`, `tag(post_id, name)`, `thread(id, title)`, `link`. The annotator reads `story_post`-tagged posts (9,813; a strict subset of `qm_post`, which adds QM meta/vote chatter).
+- `data/annotator.db` — read-write: entries, revisions, sources, story log/tree, transcripts, run state. Fresh schema (design doc §7); no migration from v1.
 
-## 3. Context Window Management
+## Autonomy
 
-### 3.1 Sliding Window Structure
+Designed for unattended multi-day runs. Checkpoint = run position only; all knowledge is in append-only stores (glossary revisions, story log/tree, transcripts), which also makes any historical context reconstructible for blame/rehydration.
 
-```
-[System Prompt]
-[Cumulative Summary: threads 1..n-3]
-[Thread n-2 Summary]
-[Thread n-1 Full Context]
-[Current Scene Posts]
-[Relevant Glossary Entries]
-[Tool Definitions]
-```
+## Out of scope (for now)
 
-### 3.2 Compaction
-
-Trigger: 80% of `max_context_tokens` (configurable, default ~200K for Qwen3).
-Target: Compact to 70%.
-
-Priority order:
-1. Summarize oldest completed thread in context
-2. Merge old summaries into cumulative summary
-3. Trim thinking tokens (preserve recent 4 turns)
-4. Truncate old assistant responses
-
-### 3.3 Thread Summaries
-
-Hybrid format: plot highlights + annotation progress (entries created/updated).
-
-### 3.4 Token Counting
-
-Primary: vLLM `/v1/tokenize` endpoint.
-Fallback: Character heuristic (chars / 4).
-Strategy: Use heuristic until threshold (e.g., 60% capacity), then verify with vLLM.
-
-### 3.5 Thinking Tokens
-
-Preserve all `/think` blocks in context history. Do not strip.
-
-## 4. Content Batching
-
-Scene-aware: batch contiguous `qm_post`-tagged posts within a thread. A "scene" ends when next post lacks `qm_post` tag or thread boundary reached.
-
-## 5. Agent Tools
-
-### 5.1 Glossary Tools
-
-| Tool | Purpose |
-|------|---------|
-| `glossary_search` | Query by term/tags/status. Returns entries without [[refs]] expanded unless `include_references=true` |
-| `glossary_create` | Add new entry. Auto-sets `first_seen_*` from current post |
-| `glossary_update` | Modify existing entry. Auto-sets `last_updated_*` |
-| `glossary_delete` | Remove entry. Requires `reason`. Logged to revision history |
-
-### 5.2 Corpus Tools
-
-| Tool | Purpose |
-|------|---------|
-| `read_post` | Fetch historical post by ID. Optional: include adjacent posts |
-| `read_thread_range` | Fetch post range within thread. Optional tag filter |
-
-### 5.3 Context Tools
-
-| Tool | Purpose |
-|------|---------|
-| `list_snapshots` | Query available snapshots by thread/type |
-| `summon_snapshot` | Rehydrate old context for dialogue. Returns initial response |
-| `summon_continue` | Continue multi-turn dialogue with summoned context |
-| `summon_dismiss` | End summoned dialogue, log summary, discard |
-
-### 5.4 Explicate Protocol
-
-Agent quotes text from an entry definition. System:
-1. Fuzzy-match quote to entry section
-2. Retrieve source post via blame tracking
-3. Return post content OR offer to summon authoring snapshot
-
-## 6. Snapshot System
-
-### 6.1 Snapshot Types
-
-| Type | Trigger |
-|------|---------|
-| `checkpoint` | Thread boundary, periodic interval |
-| `curator_fork` | Pre-curator context (discarded after) |
-| `manual` | Human-triggered |
-
-### 6.2 Storage
-
-Serialize full `AnnotationContext`: system prompt, cumulative summary, thread summaries, conversation history, current position.
-
-Also snapshot glossary entry states at that point (for blame).
-
-### 6.3 Rehydration
-
-Load snapshot into fresh context. Support multi-turn dialogue. Summoned context is read-only (cannot modify main glossary). Current agent continues after dismissal.
-
-## 7. Curator Workflow
-
-Trigger: Thread N completion.
-
-1. Fork current context
-2. Switch system prompt to curator role
-3. Query tentative entries from thread N-1
-4. For each entry: present context, ask for judgment
-5. Decisions: `CONFIRM`, `REJECT`, `MERGE`, `REVISE`
-6. Apply decisions to main glossary
-7. Discard fork context
-
-Curator uses semantic judgment, not frequency threshold.
-
-## 8. Error Handling
-
-### 8.1 vLLM Failures
-
-Retry with exponential backoff (3 attempts). On persistent failure: checkpoint full state, halt cleanly. Human restarts after fixing.
-
-### 8.2 Parse Failures
-
-Malformed agent output: log warning, skip update, continue. Do not halt.
-
-### 8.3 Tool Failures
-
-Return error to agent in tool result. Agent can retry or skip.
-
-## 9. Storage
-
-### 9.1 Databases
-
-| DB | Purpose |
-|----|---------|
-| `banished.db` | Corpus (read-only) |
-| `annotator.db` | Glossary, snapshots, state, revisions |
-
-### 9.2 Export
-
-JSON/YAML export of glossary for human review. Separate command, not part of main loop.
-
-## 10. Autonomy
-
-Designed for unattended multi-day runs. Optional soft checkpoints at thread boundaries (configurable). No human-in-loop by default.
-
-## 11. Future Scope (Out of Band)
-
-- Wiki generation: separate tool reading `annotator.db`
-- Embedding vocabulary: separate project after complete glossary
-- Multi-corpus: abstract interfaces when second corpus added
+Wiki rendering/export (steelbea.me examples pending), embedding-based retrieval on the read path, multi-corpus support, automated curation/deletion.

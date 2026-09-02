@@ -4,22 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "terrarium-annotator"
-version = "0.1.0"
-description = "Glossary annotation harness for terrarium quest fiction"
+version = "0.2.0"
+description = "LLM harness that reads fiction corpora and builds quote-grounded glossaries/lorebooks"
 requires-python = ">=3.10"
-dependencies = [
-    "requests>=2.32.0",
-    "PyYAML>=6.0.1",
-]
+dependencies = []
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
     "ruff>=0.4.0",
 ]
-
-[project.scripts]
-terrarium-annotator = "terrarium_annotator.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

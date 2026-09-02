@@ -1,5 +1,6 @@
-"""Terrarium annotator harness package."""
+"""terrarium-annotator v2: quote-grounded glossary construction for fiction corpora.
 
-from .runner import AnnotationRunner
+Clean-slate rewrite. See SPEC.md and docs/design/v2-architecture.md.
+"""
 
-__all__ = ["AnnotationRunner"]
+__version__ = "0.2.0"
