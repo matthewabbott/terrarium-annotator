@@ -395,3 +395,45 @@ class TestDispatcher:
         )
         result = json.loads(dispatcher.dispatch(tc("recall_story", {"pattern": "["})))
         assert result["ok"] is False
+
+
+class TestThreadFilter:
+    def test_unknown_thread_id_rejected(self, env):
+        corpus_path, annotator_path = env
+        runner, _ = make_runner(
+            corpus_path, annotator_path, ScriptedModel(list(SCRIPT))
+        )
+        with pytest.raises(ValueError, match="unknown thread ids"):
+            runner.run(only_threads=[999999])
+
+    def test_filter_preserves_chronological_order(self, env):
+        corpus_path, annotator_path = env
+        # Script for threads 102 then 103 (gist-only batches + 3 merges).
+        script = [
+            ChatResponse(content="They travel to Anthus; the cloak hums."),
+            ChatResponse(content="Aghtaki bandits appear; Mik pays them off."),
+            ChatResponse(content="Threads 2-3 together."),
+        ]
+        model = ScriptedModel(script)
+        runner, _ = make_runner(corpus_path, annotator_path, model)
+        # Input order is reversed; resolver order (102 before 103) must win.
+        runner.run(only_threads=[103, 102])
+        gists = [e.gist for e in runner.memory.slice(0, 2)]
+        assert gists[0].startswith("They travel")
+        assert gists[1].startswith("Aghtaki")
+
+    def test_filtered_pass_ignores_checkpoint(self, env):
+        corpus_path, annotator_path = env
+        # Establish a checkpoint mid-thread-101 with a first pass.
+        runner_a, conn = make_runner(
+            corpus_path, annotator_path, ScriptedModel(list(SCRIPT[:2]))
+        )
+        runner_a.run(max_batches=1)
+        assert load_run_state(conn, "test-pass") == (101, 1)
+        # A filtered pass on thread 101 starts at batch 0 regardless.
+        runner_b, _ = make_runner(
+            corpus_path, annotator_path, ScriptedModel(list(SCRIPT[:2]))
+        )
+        runner_b.run(max_batches=1, only_threads=[101])
+        gists = [e.gist for e in runner_b.memory.slice(0, 10)]
+        assert gists.count("Mik channels Vys into the cloak.") == 2
