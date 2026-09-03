@@ -59,5 +59,6 @@ This section guides AI agents working on the codebase across context windows.
 1. `SPEC.md` — what we are building and why
 2. `docs/design/v2-architecture.md` — how v2 fits together (the load-bearing doc)
 3. `docs/design/research-memory-rag.md` — evidence base for design choices
-4. `docs/design/context-improvements.md` — pre-cutover design notes (historical, still useful)
-5. `docs/worklog/` — what happened recently
+4. `docs/design/wiki-format.md` — target wiki page conventions (from the live steelbea.me wiki)
+5. `docs/design/context-improvements.md` — pre-cutover design notes (historical, still useful)
+6. `docs/worklog/` — what happened recently

@@ -1,0 +1,29 @@
+# Wiki Format Notes — steelbea.me/banished/wiki
+
+*Harvested 2026-09-02 (site back online). Target format for tier-2 pages and future wiki export.*
+
+The wiki is **DokuWiki**. Pages live in type-namespaces: `characters`, `locations`, `mechanics`, `objects`, `books`, `races`, `magic` (with sub-namespaces like `magic:levels:master`, `magic:effects:paralysis`), `culture`, `thread`, `irc`. Our entry tags should map 1:1 to these namespaces.
+
+## Character page (`characters:sadik`)
+
+- `# Old Man Sadik` — display-name title (not the slug)
+- Lead: image + a characteristic in-universe **quote** with attribution
+- Opening paragraph: **bolded canonical name** + 2–4 sentence standalone summary (role, why notable, relationship to protagonist)
+- Sections as applicable: `## Appearance`, `## Background` (mysteries stated as *known/unknown*, with who said what), `## Abilities` (explicitly separates demonstrated fact from in-universe speculation), `## Plot` (chronological narrative of appearances)
+- Itemized list sections where natural (`## Items Purchased from Sadik` — with prices)
+- Prose is dense with `[links]` to other pages; aliases/relations inline
+
+## Thread page (`thread:20`)
+
+- `# Thread #20` + one-line italic teaser ("We meet the monster inside our cloak and start a wargame company.")
+- `## Summary` — multi-paragraph narrative, densely linked to entity pages
+- `## Play by Play` — bullet list of beats (maps directly to our scene gists)
+- Footer: **Archive Link** `steelbea.me/banished/archive/<thread_id>/` and **Voyage Link** — the thread_id is identical to `banished.db`'s `thread.id` (31323984), so generated backlinks can construct archive URLs mechanically
+- Raw posts embedded in a folded block, tags visible (`qm_post`, `story_post`, `vote_choices`, `tally_post`)
+
+## Consequences for v2
+
+1. **Tier-2 page template**: title, optional quote, standalone summary (= tier-1 gloss, expanded), typed sections, Plot/appearances narrative generated from `entry_source` rows, link-dense prose.
+2. **Thread↔entry backlinks**: thread pages list entries touched; entry pages list threads. Both directions are derivable from `entry_source` + revisions (`log_seq`). Archive URLs: `https://steelbea.me/banished/archive/<thread_id>/`.
+3. **Fact vs. speculation separation** (Sadik's Abilities section) is a house convention worth encoding: definitions should mark confidence — aligns with our `tentative`/`confirmed` status.
+4. Namespace = tag; disambiguation suffix (`Dawn (character)`) maps to choosing the right namespace.

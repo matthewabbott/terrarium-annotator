@@ -4,7 +4,7 @@ An LLM harness that reads the Banished Quest corpus and builds a glossary/lorebo
 
 ## Status
 
-**v2 clean-slate phase.** The v1 harness (tool-loop runner, tiered compaction, snapshots, curator) was removed in September 2026 after two persistent failure modes: overzealous term extraction by local models, and context-management machinery heavier than the task. Git history preserves v1 in full; its glossary output survives as `data/exports/glossary-v2-full.json` (3,623 entries with provenance) as an evaluation baseline.
+**v2 clean-slate phase.** The v1 harness (tool-loop runner, tiered compaction, snapshots, curator) was removed in September 2026 after two persistent failure modes: overzealous term extraction by local models, and context-management machinery heavier than the task. Git history preserves v1 in full; its glossary output survives as `data/exports/glossary-v2-full.json` (3,623 entries with provenance) as an **anti-baseline** — it is full of false positives and exists to measure v2's improvement, not to imitate.
 
 Current work: implementing the v2 design.
 
@@ -20,7 +20,7 @@ The agent reads the corpus scene by scene. Persistent state is exactly two thing
 | `SPEC.md` | v2 specification |
 | `docs/design/` | v2 architecture, research findings, design worklog |
 | `docs/worklog/` | Session logs |
-| `data/` | Gitignored run artifacts; `data/exports/` holds the v1 glossary baseline |
+| `data/` | Gitignored run artifacts; `data/exports/` holds the v1 glossary anti-baseline |
 | `src/terrarium_annotator/` | (to be built) |
 | `tests/` | (to be built) |
 

@@ -93,6 +93,8 @@ page = card + {
 }
 ```
 
+Page layout follows the live steelbea.me wiki's conventions — see `wiki-format.md` (type namespaces, quote-lead, fact-vs-speculation sections, chronological Plot narrative generated from `entry_source`, archive-URL backlinks via `thread_id`).
+
 Small models fail to call needed tools 30–50% of the time (research §2), so the system must **degrade to card-only**, never fail: cards carry a one-line "full page available" hint, and nothing in the read path *requires* a page fetch. For frontier API models the balance can shift toward pull; for local models bias toward inject. Either way pages stay out of default context.
 
 ### Definitions are versioned, never overwritten
@@ -176,7 +178,7 @@ That's all. No delete (deletion is a human/audit action). Rehydration/interrogat
 - **Comprehension QA**: 50–100 questions requiring setting knowledge, answered with glossary + digest only; failures identify recall holes (adversarial second pass with a different prompt/model as an alternative recall probe).
 - **False-merge rate** on the merge queue (fiction trope: distinct characters sharing names) — every merge needs pair-judgment citing both entries' evidence.
 
-The v1 glossary export (`data/exports/glossary-v2-full.json`, 3,623 entries, 100% provenance coverage) is the comparison baseline for the first eval run.
+The v1 glossary export (`data/exports/glossary-v2-full.json`, 3,623 entries) is an **anti-baseline** for the first eval run: per Matt it is full of false positives, so it is not a quality reference. Use it to (a) confirm v2 beats its precision/junk rate and (b) calibrate junk detectors against its known failure categories (dice rolls, platform terms, action phrases, fragment duplicates). Its provenance coverage (100% of entries have sources) is the one property worth matching.
 
 ---
 
@@ -196,7 +198,7 @@ FTS5 over `entry(term, gloss)` for card lookup; no vector index until the duplic
 
 ## 8. Explicitly out of scope (for now)
 
-- Wiki page rendering/export to steelbea.me (needs example pages; site currently 502s — revisit when up)
+- Wiki page rendering/export to steelbea.me (format conventions pinned in `wiki-format.md`, harvested 2026-09-02 when the site came back online; generation itself is post-glossary work)
 - Semantic/embedding retrieval on the read path
 - Multi-corpus abstraction (building codes etc.) — design permits, implement when second corpus arrives
 - Curator fork / batch curator — replaced by write-time verification + audit dashboard; reconsider only if metrics say so

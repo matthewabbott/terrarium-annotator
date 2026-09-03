@@ -2,7 +2,7 @@
 
 LLM harness that reads a fiction corpus sequentially and builds a glossary/wiki of setting-specific terminology, characters, and places — with every entry grounded in verifiable source quotes. Primary corpus: Banished Quest (`banished.db`). Design permits future corpora.
 
-**v2 is a clean-slate rewrite.** v1 code, schema, and docs were removed 2026-09-02 (git history preserves them). The v1 glossary output survives as `data/exports/glossary-v2-full.json` (3,623 entries) for use as an evaluation baseline.
+**v2 is a clean-slate rewrite.** v1 code, schema, and docs were removed 2026-09-02 (git history preserves them). The v1 glossary output survives as `data/exports/glossary-v2-full.json` (3,623 entries) — an **anti-baseline, not an example**: it is full of false positives (dice rolls, platform terms, action phrases, fragment duplicates) and serves only to measure v2's improvement and calibrate junk detectors.
 
 ## Core ideas
 
@@ -29,7 +29,7 @@ Hard dashboard after every pass (provenance coverage, quote validity, dangling l
 
 ## Storage
 
-- `banished.db` — corpus, **read-only, never modify** (currently irreplaceable: source server 502s). `post(id, thread_id, body, time)`, `tag(post_id, name)`, `thread(id, title)`, `link`. The annotator reads `story_post`-tagged posts (9,813; a strict subset of `qm_post`, which adds QM meta/vote chatter).
+- `banished.db` — corpus, **read-only, never modify** (re-download source has been unreliable — keep an off-repo backup). `post(id, thread_id, body, time)`, `tag(post_id, name)`, `thread(id, title)`, `link`. The annotator reads `story_post`-tagged posts (9,813; a strict subset of `qm_post`, which adds QM meta/vote chatter; predicate is configurable).
 - `data/annotator.db` — read-write: entries, revisions, sources, story log/tree, transcripts, run state. Fresh schema (design doc §7); no migration from v1.
 
 ## Autonomy
@@ -38,4 +38,4 @@ Designed for unattended multi-day runs. Checkpoint = run position only; all know
 
 ## Out of scope (for now)
 
-Wiki rendering/export (steelbea.me examples pending), embedding-based retrieval on the read path, multi-corpus support, automated curation/deletion.
+Wiki rendering/export to steelbea.me (page format pinned in `docs/design/wiki-format.md`), embedding-based retrieval on the read path, multi-corpus support, automated curation/deletion.
