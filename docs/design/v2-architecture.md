@@ -148,7 +148,7 @@ For this to work, three stores must be replayable: `story_log` (append-only ✓)
 |------|---------|-------|
 | `propose_entry` | Create card+page with initial definition | Requires quote from current scene; rejected if term/alias already exists |
 | `update_entry` | Append a revision (new/extended definition) | Requires quote; old revision retained |
-| `add_alias` | Register a surface form for an existing entry | Alias must appear in a cited post |
+| `add_alias` | Register a surface form for an existing entry | Same quote gate (verbatim quote containing the alias); recorded to `entry_source` with NULL revision (not a definition change) |
 | `fetch_entry` | Pull full tier-2 page (body, backlinks, revisions) | — |
 | `fetch_post` / `fetch_thread_range` | Re-read source posts (ReadAgent lookup) | Read-only, corpus only |
 | `recall_story` | Grep the story log / zoom tree nodes | Read-only |

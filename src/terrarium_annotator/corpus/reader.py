@@ -69,6 +69,13 @@ class CorpusReader:
                 body=r[5] or "",
             )
 
+    def post_body(self, post_id: int) -> str | None:
+        """Body of a single post by id, or None if absent. Quote checks."""
+        row = self._conn.execute(
+            "SELECT body FROM post WHERE id = ?", (post_id,)
+        ).fetchone()
+        return row[0] if row else None
+
     def batches(
         self, thread_id: int, batch_size: int = DEFAULT_BATCH_SIZE
     ) -> Iterator[Batch]:
