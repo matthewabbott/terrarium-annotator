@@ -34,7 +34,7 @@ Minimal `/v1/chat/completions` stub exercising the real HTTP client: retries wit
 
 ### L3 — Invariant-checked smoke run (real model, tiny slice)
 
-Run the real pipeline with the real budget model on **threads 1–2** of `banished.db`, then run an automated post-run checker over `annotator.db`:
+Run the real pipeline with the real budget model on the **two chronologically-first threads** of `banished.db`, then run an automated post-run checker over `annotator.db`:
 
 - 100% quote validity, re-verified against the corpus (quote is substring of cited post, contains term/alias)
 - provenance coverage = 100%, referential integrity of all backlinks
@@ -42,11 +42,13 @@ Run the real pipeline with the real budget model on **threads 1–2** of `banish
 - entries/1k posts inside the agreed band (calibrated after first run)
 - resume consistency: second launch does no duplicate work
 
-Catches what fakes can't: tool-call format drift, paraphrased quotes, context-assembly ordering bugs. Costs ~2 threads of tokens.
+The slice is resolved by query, not hardcoded — reading order is `ORDER BY op_post.time ASC`. Thread IDs are **not** monotonic with story order: the corpus mixes sources (thread id 12922 is story-thread 194 while id 31323984 is story-thread 20). As of 2026-09-02 the first two threads are **30265887** ("Banished Quest") and **30305969** — matching where v1's glossary sources start.
+
+Catches what fakes can't: tool-call format drift, paraphrased quotes, context-assembly ordering bugs. Costs ~2 threads of tokens. **On-demand only, never a CI gate** — it spends subscription budget and is non-deterministic; CI runs L0–L2 + L4 replays.
 
 ### L4 — Recorded replay
 
-Record L3's raw request/response pairs as fixtures; replay them deterministically in the test suite. Regression-tests the runner against *real model output* forever, without spending tokens. Refresh recordings when prompts/schemas change deliberately.
+Record L3's raw request/response pairs as first-class fixtures; replay them deterministically in the test suite and **assert replay idempotence** (same recorded input stream → identical resulting DB state). Regression-tests the runner against *real model output* forever, without spending tokens. Refresh recordings only when prompts/schemas change deliberately.
 
 ### L5 — Quality evals (later)
 
@@ -61,9 +63,9 @@ Record L3's raw request/response pairs as fixtures; replay them deterministicall
 
 ## Model serving
 
-LLM access sits behind a minimal `chat(messages, tools) -> response` interface with two planned implementations:
+LLM access sits behind a minimal, provider-neutral `chat(messages, tools) -> response` interface — that interface is the primary seam. Two planned implementations:
 
 1. **OpenAI-compatible HTTP** (boring default; v1's AgentClient shape): works for Moonshot/Kimi API direct, and later local serving (vLLM/llama.cpp for gemma 4 now, Laguna box when it arrives).
-2. **omp RPC** (`omp_rpc` Python client): uses the existing subscription login, and its host-tools sub-protocol maps 1:1 onto our design — the annotator registers `propose_entry`/`update_entry`/etc. via `set_host_tools`, the omp session calls back into them. Caveats to validate in a spike: session startup cost per run (amortized — one session per reading pass), taming ambient coding-agent machinery (compaction off — our digest owns memory; todo reminders; system prompt override), and per-scene latency.
+2. **omp RPC** — **proposed adapter, unverified.** omp is not an OpenAI-compatible HTTP server; integration would go through its RPC mode. The RPC wire protocol documents `set_host_tools`, and the TS helper wraps it as `setCustomTools`, but the Python `omp_rpc` client's exact host-tool/prompt/session semantics are **unconfirmed** (`omp_rpc` is not installed on this machine; validate against the `python/omp-rpc` README/source in the omp repo before coupling). If it holds, it uses the existing subscription login and our glossary tools become host tools called back into the annotator. Known machinery to tame regardless: session startup cost per run (amortized — one session per reading pass), ambient coding-agent features (compaction off — our digest owns memory; todo reminders; system prompt override), per-scene latency.
 
 Start with (1) for the baseline entry-generation pass on Kimi; spike (2) when subscription-quota economics matter.
