@@ -8,6 +8,10 @@ version = "0.2.0"
 requires-python = ">=3.10"
 dependencies = ["requests>=2.32.0"]
 
+
+[project.scripts]
+terrarium-annotator = "terrarium_annotator.cli:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",

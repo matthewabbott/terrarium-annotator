@@ -35,6 +35,10 @@ CREATE TABLE IF NOT EXISTS run_state(
     batch_index INTEGER NOT NULL,
     updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS run_meta(
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 
@@ -74,6 +78,21 @@ def load_run_state(conn: sqlite3.Connection) -> tuple[int, int] | None:
         "SELECT thread_id, batch_index FROM run_state WHERE id = 1"
     ).fetchone()
     return (row[0], row[1]) if row else None
+
+
+def save_run_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
+    """Persist run configuration (budget compliance is checked against it)."""
+    conn.execute(
+        "INSERT INTO run_meta VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )
+    conn.commit()
+
+
+def load_run_meta(conn: sqlite3.Connection, key: str) -> str | None:
+    row = conn.execute("SELECT value FROM run_meta WHERE key = ?", (key,)).fetchone()
+    return row[0] if row else None
 
 
 def record_transcript(

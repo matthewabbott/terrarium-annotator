@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 from terrarium_annotator.corpus import DEFAULT_BATCH_SIZE, Batch, CorpusReader, Thread
 from terrarium_annotator.glossary import GlossaryStore, Provenance
@@ -23,6 +23,7 @@ from terrarium_annotator.memory import StoryLog
 from terrarium_annotator.state import (
     load_run_state,
     record_transcript,
+    save_run_meta,
     save_run_state,
 )
 from terrarium_annotator.tools import ToolDispatcher
@@ -95,6 +96,7 @@ class Runner:
         skipped. If the checkpoint's thread is gone, everything is done.
         """
         threads = self.corpus.thread_order()
+        save_run_meta(self.conn, "config", json.dumps(asdict(self.config)))
         resume = load_run_state(self.conn)
         resume_idx = 0
         resume_batch = 0
@@ -165,6 +167,15 @@ class Runner:
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user},
         ]
+        record_transcript(
+            self.conn,
+            pass_id=cfg.pass_id,
+            thread_id=thread.id,
+            batch_index=batch.index,
+            log_seq=seq,
+            role="user",
+            content=user,
+        )
 
         response = self._chat(messages)
         rounds = 0

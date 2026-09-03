@@ -66,7 +66,7 @@
 
 - `annotator verify <db>`: post-run invariant checker (quote validity vs corpus, provenance coverage, backlink integrity, budget compliance, resume-consistency probe). Doubles as dashboard v1.
 - **Acceptance**: L0 tests: checker passes T6's fabricated run output, fails on seeded violations (one per invariant). `tests/test_verify.py`.
-- **Status**: in progress (2026-09-03 goal-mode session).
+- **Status**: done (2026-09-03; 13 L0 tests incl. CLI exit codes + 10 seeded violations, merge bar green, real `terrarium-annotator verify` invocation clean).
 
 ### T8 — Scene segmentation heuristic (deferred, bounded)
 
