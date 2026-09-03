@@ -5,7 +5,6 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "terrarium-annotator"
 version = "0.2.0"
-description = "LLM harness that reads fiction corpora and builds quote-grounded glossaries/lorebooks"
 requires-python = ">=3.10"
 dependencies = []
 

@@ -20,7 +20,7 @@
 - `batches(thread_id, batch_size)`: group the thread's story posts (time order) into batches of at most `batch_size` posts; batch = {thread_id, batch_index, post_ids, text}. **No gap heuristics in T1** — explicit size-based batches only; thread boundary always breaks a batch. Vote tallies/meta are simply excluded by the tag predicate. (Gap-based scene segmentation and its benchmark are deferred — see T8.)
 - Config: tag predicate (`story_post` default), DB path.
 - **Acceptance**: L0 tests on fabricated SQLite fixtures: ordering matches resolver, double-tagged posts handled, threads lacking `op_post` ordered by fallback, batch boundaries respected (size cap, no cross-thread batches, empty threads), reader connection is read-only. `tests/test_corpus.py`.
-- **Status**: in progress (2026-09-03 session).
+- **Status**: done (2026-09-03; 12 L0 tests, merge bar green).
 
 ### T2 — Story log + merge tree (`memory/`)
 
