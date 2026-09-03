@@ -37,7 +37,7 @@
 - `propose_entry` / `update_entry` / `add_alias` semantics; **quote gate**: quote must be a verbatim substring of the cited post AND contain the term/alias, or the write is rejected.
 - No delete/UPDATE path. Merges union evidence (API exists, human-invoked).
 - **Acceptance**: L0 incl. adversarial fixtures (paraphrased quote, quote spanning posts, unknown term alias, unicode/case). `tests/test_glossary.py`.
-- **Status**: pending.
+- **Status**: in progress (2026-09-03 goal-mode session).
 
 ### T4 — Injection layer (`inject/`)
 
