@@ -103,10 +103,13 @@ class GlossaryStore:
 
     def __init__(
         self,
-        db_path: Path | str,
+        db: Path | str | sqlite3.Connection,
         post_body: Callable[[int], str | None],
     ) -> None:
-        self._conn = sqlite3.connect(db_path)
+        # Accept a shared connection (architecture §7: one annotator.db);
+        # close() is a no-op for connections we do not own.
+        self._owns = not isinstance(db, sqlite3.Connection)
+        self._conn = db if isinstance(db, sqlite3.Connection) else sqlite3.connect(db)
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.executescript(SCHEMA)
         self._post_body = post_body
@@ -439,7 +442,8 @@ class GlossaryStore:
             )
 
     def close(self) -> None:
-        self._conn.close()
+        if self._owns:
+            self._conn.close()
 
     def __enter__(self) -> GlossaryStore:  # noqa: PYI034 — Self needs 3.11; floor is 3.10
         return self

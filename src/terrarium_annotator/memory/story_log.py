@@ -76,10 +76,15 @@ class DigestItem:
 class StoryLog:
     """Append-only story log with lazy merge tree over an SQLite store."""
 
-    def __init__(self, db_path: Path | str = ":memory:") -> None:
-        self._conn = sqlite3.connect(db_path)
+    def __init__(self, db: Path | str | sqlite3.Connection = ":memory:") -> None:
+        # Accept a shared connection so story log, glossary, and run state
+        # live in one annotator.db (architecture §7); close() is a no-op
+        # for connections we do not own.
+        self._owns = not isinstance(db, sqlite3.Connection)
+        self._conn = db if isinstance(db, sqlite3.Connection) else sqlite3.connect(db)
         self._conn.executescript(SCHEMA)
         self._conn.execute("INSERT OR IGNORE INTO tree_meta VALUES ('tree_version', 0)")
+        self._conn.commit()
 
     # ------------------------------------------------------------- log
 
@@ -297,7 +302,8 @@ class StoryLog:
     # --------------------------------------------------------- misc
 
     def close(self) -> None:
-        self._conn.close()
+        if self._owns:
+            self._conn.close()
 
     def __enter__(self) -> StoryLog:  # noqa: PYI034 — Self needs 3.11; floor is 3.10
         return self

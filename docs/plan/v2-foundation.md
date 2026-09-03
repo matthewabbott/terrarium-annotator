@@ -60,13 +60,13 @@
 - Thread close: issue due merge calls; periodic re-verification queue hook (stub OK).
 - Resume from `run_state` mid-thread.
 - **Acceptance**: L1 end-to-end — ScriptedModel + fabricated 3-thread corpus, all L1 assertions from `dev-verification.md` incl. adversarial fixtures and kill/resume. `tests/test_runner.py`.
-- **Status**: in progress (2026-09-03 goal-mode session).
+- **Status**: done (2026-09-03; 12 L1/L0 tests — full dev-verification L1 set incl. kill/resume, per-boundary digest budget, merge ordering, oversized-gist/summary truncation, nonexistent-term calls; merge bar green).
 
 ### T7 — Verify CLI (`cli.py`)
 
 - `annotator verify <db>`: post-run invariant checker (quote validity vs corpus, provenance coverage, backlink integrity, budget compliance, resume-consistency probe). Doubles as dashboard v1.
 - **Acceptance**: L0 tests: checker passes T6's fabricated run output, fails on seeded violations (one per invariant). `tests/test_verify.py`.
-- **Status**: pending.
+- **Status**: in progress (2026-09-03 goal-mode session).
 
 ### T8 — Scene segmentation heuristic (deferred, bounded)
 
