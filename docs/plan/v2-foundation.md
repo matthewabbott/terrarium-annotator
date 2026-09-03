@@ -37,7 +37,7 @@
 - `propose_entry` / `update_entry` / `add_alias` semantics; **quote gate**: quote must be a verbatim substring of the cited post AND contain the term/alias, or the write is rejected.
 - No delete/UPDATE path. Merges union evidence (API exists, human-invoked).
 - **Acceptance**: L0 incl. adversarial fixtures (paraphrased quote, quote spanning posts, unknown term alias, unicode/case). `tests/test_glossary.py`.
-- **Status**: done (2026-09-03; 19 L0 tests incl. adversarial quote fixtures, merge bar green).
+- **Status**: done (2026-09-03; 21 L0 tests incl. adversarial quote fixtures, merge bar green).
 
 ### T4 — Injection layer (`inject/`)
 
@@ -45,14 +45,14 @@
 - Hard token budget (default 15% of configured context), priority = recently-updated then shortest, recursion ≤1.
 - Pure function: `(scene_text, entries, budget) -> injected_cards`; token counter injected.
 - **Acceptance**: L0 budget/drop-order/recursion tests. `tests/test_injection.py`.
-- **Status**: in progress (2026-09-03 goal-mode session).
+- **Status**: done (2026-09-03; 12 L0 tests incl. gloss-only-recursion adversarial case, merge bar green).
 
 ### T5 — LLM client seam (`llm/`)
 
 - `ChatClient` protocol: `chat(messages, tools) -> response`.
 - `OpenAICompatibleClient` (v1 AgentClient shape: retries/backoff/timeout) + `ScriptedModel` (fixture-replay) + recording wrapper for L4.
 - **Acceptance**: L2 stub-server tests (5xx, malformed JSON, schema drift); ScriptedModel replays fixtures exactly. `tests/test_llm.py`.
-- **Status**: pending.
+- **Status**: in progress (2026-09-03 goal-mode session).
 
 ### T6 — Runner (`runner.py`, `tools/`)
 
