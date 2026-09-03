@@ -4,6 +4,8 @@ injected client factory (no real model)."""
 
 from __future__ import annotations
 
+import argparse
+
 import pytest
 from test_runner import (  # noqa: F401  (fixture reuse)
     CORPUS_POSTS,
@@ -22,7 +24,7 @@ class TestParseThreads:
         assert parse_threads("30265887, 30305969") == [30265887, 30305969]
 
     def test_rejects_garbage(self):
-        with pytest.raises(Exception, match="comma-separated"):
+        with pytest.raises(argparse.ArgumentTypeError, match="comma-separated"):
             parse_threads("abc,123")
 
     def test_empty_is_empty_list(self):
