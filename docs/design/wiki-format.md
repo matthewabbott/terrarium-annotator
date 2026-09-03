@@ -18,7 +18,7 @@ The wiki is **DokuWiki**. Pages live in type-namespaces: `characters`, `location
 - `# Thread #20` + one-line italic teaser ("We meet the monster inside our cloak and start a wargame company.")
 - `## Summary` — multi-paragraph narrative, densely linked to entity pages
 - `## Play by Play` — bullet list of beats (maps directly to our scene gists)
-- Footer: **Archive Link** `steelbea.me/banished/archive/<thread_id>/` and **Voyage Link**. Verified against `banished.db`: `thread.id` equals the OP post's `post.id` for **all 276 threads, no exceptions**, and the archive URL keys on it — generated backlinks construct archive URLs mechanically from `thread_id`.
+- Footer: **Archive Link** `steelbea.me/banished/archive/<thread_id>/` and **Voyage Link**. Verified against `banished.db`: `thread.id` equals the OP post's `post.id` for **all 276 threads, no exceptions**, and the archive URL keys on it. Exporter rule: **derive** the archive id from the thread's `op_post`-tagged post and *assert* `post.id == thread_id` at export time — don't assume the convention; a future corpus rebuild could break it, and a failed assertion beats a wrong backlink.
 - Raw posts embedded in a folded block, tags visible (`qm_post`, `story_post`, `vote_choices`, `tally_post`)
 
 **Uniformity caveat**: observed on two thread pages. Structure is typical, not guaranteed — thread:20's fold is titled "Posts" with an explicit Archive/Voyage footer; thread:5's is "Story Posts". Spot-check more pages before writing the exporter.
