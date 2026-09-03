@@ -29,7 +29,7 @@
 - `cover(T, budget)`: budgeted age-decaying digest (OptMem algorithm); `forget(block)` + rebuild.
 - Merge function is injected (`Callable[[list[str]], str]`) — LLM-free in tests.
 - **Acceptance**: L0 property tests from `dev-verification.md` (cover ≤ budget, aligned powers of two, granularity non-increasing toward T, rebuild-from-log equivalence, forget/rebuild consistency). `tests/test_story_log.py`.
-- **Status**: pending.
+- **Status**: done (2026-09-03; 20 L0 tests, merge bar green; design doc §1 refined to match).
 
 ### T3 — Glossary store + quote gate (`glossary/`)
 

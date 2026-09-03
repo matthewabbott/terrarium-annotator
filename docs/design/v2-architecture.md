@@ -29,7 +29,7 @@ The data structure fits sequential fiction reading almost perfectly: the corpus 
 Four deviations from stock OptMem:
 
 1. **Reimplement in-process, don't shell out.** The harness drives the agent loop; merges become harness-scheduled LLM calls, not agent chores via a CLI. We keep the algorithm (fixed records, lazy tree, budgeted cover) and drop the subprocess/prompt-block integration.
-2. **Align blocks to discourse boundaries.** Stock OptMem pairs raw adjacent memories. We append one log entry per *scene* and permit merges only within a thread until the thread closes — tree structure then respects narrative units instead of splitting mid-scene.
+2. **Thread-gated settlement on aligned blocks.** *(Refined at T2 implementation, 2026-09-03.)* Blocks stay aligned powers of two over the global log exactly as OptMem — but a block becomes *eligible to settle* only once every entry in it belongs to a closed thread, so merges never touch the thread being read (a block straddling a boundary waits for both threads). This preserves block alignment, which boundary-aligned blocks would break. One log entry per batch of story posts. Additionally, `cover()` falls back to raw log entries when a needed summary is unsettled rather than refusing like OptMem's wake — the digest is always renderable; the budget is guaranteed only when the tree is settled.
 3. **Glossary lives outside the tree.** Entities must not decay with age. Glossary cards (§3) are always-on core context; the tree only carries *plot continuity*.
 4. **Retrieval = deterministic, not semantic.** Keyword/grep over the log + glossary backlink index (§4). Small models can't be trusted to manage embeddings-based self-paging (MemGPT's "memory blindness"); deterministic paging degrades gracefully.
 
@@ -40,7 +40,7 @@ What we deliberately do **not** adopt: the 280-byte entry cap (scene gists get ~
 ## 2. Story memory: the reading loop
 
 ```
-For each scene (contiguous story_post-tagged posts in a thread):
+For each batch (fixed-size run of story_post posts in a thread; plan T1):
   1. Assemble context:
        system prompt
      + story digest      (budgeted cover of the summary tree, finest near present)
@@ -50,7 +50,8 @@ For each scene (contiguous story_post-tagged posts in a thread):
   3. Harness appends one gist entry to the story log
      (agent-written 1-3 line gist, or harness-extracted fallback).
 At thread close:
-  4. Harness issues merge calls for due tree blocks (thread-aligned).
+  4. Harness issues merge calls for newly settleable tree blocks (§1:
+     aligned blocks whose entries are all in closed threads, in order).
   5. Periodic re-verification queue updates (§6).
 ```
 
