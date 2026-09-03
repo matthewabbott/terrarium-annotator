@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "terrarium-annotator"
 version = "0.2.0"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = ["requests>=2.32.0"]
 
 [project.optional-dependencies]
 dev = [

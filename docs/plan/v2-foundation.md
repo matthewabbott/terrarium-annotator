@@ -52,7 +52,7 @@
 - `ChatClient` protocol: `chat(messages, tools) -> response`.
 - `OpenAICompatibleClient` (v1 AgentClient shape: retries/backoff/timeout) + `ScriptedModel` (fixture-replay) + recording wrapper for L4.
 - **Acceptance**: L2 stub-server tests (5xx, malformed JSON, schema drift); ScriptedModel replays fixtures exactly. `tests/test_llm.py`.
-- **Status**: in progress (2026-09-03 goal-mode session).
+- **Status**: done (2026-09-03; 15 L2 tests, merge bar green).
 
 ### T6 — Runner (`runner.py`, `tools/`)
 
@@ -60,7 +60,7 @@
 - Thread close: issue due merge calls; periodic re-verification queue hook (stub OK).
 - Resume from `run_state` mid-thread.
 - **Acceptance**: L1 end-to-end — ScriptedModel + fabricated 3-thread corpus, all L1 assertions from `dev-verification.md` incl. adversarial fixtures and kill/resume. `tests/test_runner.py`.
-- **Status**: pending.
+- **Status**: in progress (2026-09-03 goal-mode session).
 
 ### T7 — Verify CLI (`cli.py`)
 
