@@ -80,10 +80,13 @@ This repo provides the *inputs* to an overnight run: sequenced tasks, guardrails
 
 The driver is **an externally launched agent session** (e.g. `omp` started by Matt, or a cron/loop wrapper he sets up) executing this protocol:
 
+Expect **multiple sessions**: one session attempts pending tasks until its context limit, then stops; completing T1–T7 requires external relaunch/supervision across sessions, with continuity carried by this file's Status lines and the worklog. Nothing here auto-resumes a dead session.
+
 1. Read SPEC, design docs, this plan, recent worklog (AGENTS.md session protocol).
-2. Pick the first task whose Status is exactly `pending` — skip `deferred` (T8) and everything under "Gated on Matt"; flip it to `in progress` in the same commit that starts it. If no `pending` task remains, STOP: the autonomous scope is complete.
-3. Implement + tests; merge bar (`pytest -q`, `ruff check src tests`); commit; flip Status to `done`.
-4. Worklog entry; continue to next task or end session (context limits).
+2. **Crash recovery first**: if any task is `in progress`, look for completion evidence (a later commit flipping it to `done` + worklog entry). Absent that, the previous session died mid-task: inspect the working tree and last commit; resume the task if the partial work is sound, otherwise reset it to `pending`. Never end a session leaving a task in `in progress` without a worklog note explaining why.
+3. Pick the first task whose Status is exactly `pending` — skip `deferred` (T8) and everything under "Gated on Matt"; flip it to `in progress` in the same commit that starts it. If no `pending` (or reclaimed) task remains, STOP: the autonomous scope is complete.
+4. Implement + tests; merge bar (`pytest -q`, `ruff check src tests`); commit; flip Status to `done`.
+5. Worklog entry; continue to next task or end session (context limits).
 
 Escalation is manual-by-design: the driver stops at any Gated item, any guardrail 5 stop condition, or any merge-bar failure it cannot fix in-scope — and documents the blocker in the worklog. Durable task state = this file's Status lines + git history; per-task verification = the merge bar at each commit.
 
