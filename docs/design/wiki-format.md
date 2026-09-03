@@ -18,12 +18,14 @@ The wiki is **DokuWiki**. Pages live in type-namespaces: `characters`, `location
 - `# Thread #20` + one-line italic teaser ("We meet the monster inside our cloak and start a wargame company.")
 - `## Summary` — multi-paragraph narrative, densely linked to entity pages
 - `## Play by Play` — bullet list of beats (maps directly to our scene gists)
-- Footer: **Archive Link** `steelbea.me/banished/archive/<thread_id>/` and **Voyage Link** — the thread_id is identical to `banished.db`'s `thread.id` (31323984), so generated backlinks can construct archive URLs mechanically
+- Footer: **Archive Link** `steelbea.me/banished/archive/<thread_id>/` and **Voyage Link**. Verified against `banished.db`: `thread.id` equals the OP post's `post.id` for **all 276 threads, no exceptions**, and the archive URL keys on it — generated backlinks construct archive URLs mechanically from `thread_id`.
 - Raw posts embedded in a folded block, tags visible (`qm_post`, `story_post`, `vote_choices`, `tally_post`)
+
+**Uniformity caveat**: observed on two thread pages. Structure is typical, not guaranteed — thread:20's fold is titled "Posts" with an explicit Archive/Voyage footer; thread:5's is "Story Posts". Spot-check more pages before writing the exporter.
 
 ## Consequences for v2
 
 1. **Tier-2 page template**: title, optional quote, standalone summary (= tier-1 gloss, expanded), typed sections, Plot/appearances narrative generated from `entry_source` rows, link-dense prose.
-2. **Thread↔entry backlinks**: thread pages list entries touched; entry pages list threads. Both directions are derivable from `entry_source` + revisions (`log_seq`). Archive URLs: `https://steelbea.me/banished/archive/<thread_id>/`.
+2. **Thread↔entry backlinks**: thread pages list entries touched; entry pages list threads. Both directions are derivable from `entry_source` + revisions (`log_seq`). Archive URLs: `https://steelbea.me/banished/archive/<thread_id>/` (verified: `thread.id` = OP `post.id` across all 276 threads).
 3. **Fact vs. speculation separation** (Sadik's Abilities section) is a house convention worth encoding: definitions should mark confidence — aligns with our `tentative`/`confirmed` status.
 4. Namespace = tag; disambiguation suffix (`Dawn (character)`) maps to choosing the right namespace.
