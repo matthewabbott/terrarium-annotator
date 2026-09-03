@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 from collections.abc import Callable
 
 from terrarium_annotator.corpus import CorpusReader
@@ -153,7 +154,13 @@ class ToolDispatcher:
         try:
             result = self._route(call)
             return json.dumps({"ok": True, "result": result})
-        except (GlossaryError, ValueError, KeyError, TypeError) as exc:
+        except (
+            GlossaryError,
+            ValueError,
+            KeyError,
+            TypeError,
+            sqlite3.IntegrityError,
+        ) as exc:
             return json.dumps({"ok": False, "error": str(exc)})
 
     def _route(self, call: ToolCall) -> object:

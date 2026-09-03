@@ -352,6 +352,12 @@ class GlossaryStore:
             raise QuoteRejected(f"quote is not verbatim in post {evidence.post_id}")
         if alias not in evidence.quote:
             raise QuoteRejected(f"quote does not contain alias {alias!r}")
+        existing = self._conn.execute(
+            "SELECT 1 FROM entry_alias WHERE entry_id = ? AND alias_normalized = ?",
+            (entry.id, _norm(alias)),
+        ).fetchone()
+        if existing:
+            return  # idempotent: re-registering an entry's own alias is a no-op
         self._conn.execute(
             "INSERT INTO entry_alias VALUES (?, ?, ?)",
             (entry.id, alias, _norm(alias)),

@@ -11,7 +11,7 @@ import pytest
 from test_corpus import add_thread, make_corpus
 
 from terrarium_annotator.corpus import CorpusReader
-from terrarium_annotator.glossary import GlossaryStore
+from terrarium_annotator.glossary import GlossaryStore, Provenance
 from terrarium_annotator.llm import ChatResponse, ScriptedModel, ToolCall
 from terrarium_annotator.memory import StoryLog
 from terrarium_annotator.runner import Runner, RunnerConfig
@@ -437,3 +437,70 @@ class TestThreadFilter:
         runner_b.run(max_batches=1, only_threads=[101])
         gists = [e.gist for e in runner_b.memory.slice(0, 10)]
         assert gists.count("Mik channels Vys into the cloak.") == 2
+
+
+class TestDispatcherIntegrity:
+    def test_alias_readd_through_dispatch_is_ok(self, env):
+        """The smoke-run crash: model re-registers an entry's own alias."""
+        corpus_path, annotator_path = env
+        corpus = CorpusReader(corpus_path)
+        conn = connect_annotator_db(annotator_path)
+        store = GlossaryStore(conn, corpus.post_body)
+        dispatcher = ToolDispatcher(
+            store,
+            corpus,
+            StoryLog(conn),
+            provenance=lambda: Provenance(thread_id=101, pass_id="t"),
+        )
+        propose = tc(
+            "propose_entry",
+            {
+                "term": "Vys",
+                "gloss": "Raw magical energy.",
+                "evidence": [
+                    {"post_id": 1001, "quote": "channeled Vys into the cloak"}
+                ],
+            },
+        )
+        assert json.loads(dispatcher.dispatch(propose))["ok"] is True
+        alias = tc(
+            "add_alias",
+            {
+                "term": "Vys",
+                "alias": "Vys",  # re-registering the term itself
+                "evidence": {"post_id": 1001, "quote": "channeled Vys into the cloak"},
+            },
+        )
+        assert json.loads(dispatcher.dispatch(alias))["ok"] is True
+        # Second registration of the same alias: ok, no IntegrityError.
+        assert json.loads(dispatcher.dispatch(alias))["ok"] is True
+
+    def test_integrity_error_becomes_error_payload(self, env):
+        import sqlite3 as _sqlite3
+
+        corpus_path, annotator_path = env
+        corpus = CorpusReader(corpus_path)
+        conn = connect_annotator_db(annotator_path)
+        store = GlossaryStore(conn, corpus.post_body)
+        dispatcher = ToolDispatcher(
+            store, corpus, StoryLog(conn), provenance=lambda: None
+        )
+
+        def broken(*args, **kwargs):
+            raise _sqlite3.IntegrityError("UNIQUE constraint failed")
+
+        store.add_alias = broken  # simulate a store-level integrity failure
+        result = json.loads(
+            dispatcher.dispatch(
+                tc(
+                    "add_alias",
+                    {
+                        "term": "Vys",
+                        "alias": "vys",
+                        "evidence": {"post_id": 1001, "quote": "q Vys"},
+                    },
+                )
+            )
+        )
+        assert result["ok"] is False
+        assert "UNIQUE constraint" in result["error"]

@@ -201,6 +201,13 @@ class TestAlias:
                 "Vatis", "Master vatis", evidence=Evidence(300, "Master vatis!")
             )
 
+    def test_readding_same_alias_is_idempotent_noop(self, store):
+        propose(store)
+        ev = Evidence(300, "welcomed the Master vatis to the library")
+        store.add_alias("Vatis", "Master vatis", evidence=ev)
+        store.add_alias("Vatis", "Master vatis", evidence=ev)  # same alias again
+        assert store.get("Vatis").aliases == ("Master vatis",)
+
 
 class TestMergeAndStatus:
     def test_merge_unions_evidence(self, store):
