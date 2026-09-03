@@ -42,7 +42,25 @@ Run the real pipeline with the real budget model on the **two chronologically-fi
 - entries/1k posts inside the agreed band (calibrated after first run)
 - resume consistency: second launch does no duplicate work
 
-The slice is resolved by query, not hardcoded — reading order is `ORDER BY op_post.time ASC`. Thread IDs are **opaque, not chronological**: the corpus mixes sources (thread id 12922 is story-thread 194 while id 31323984 is story-thread 20). As of 2026-09-02 the first threads are **30265887** ("Banished Quest"), **30305969**, then **30392208** ("Banished Quest 3") — matching where v1's glossary sources start.
+The slice is resolved by query, not hardcoded. Executable thread-ordering resolver (verified against `banished.db`):
+
+```sql
+-- Prefer the op_post-tagged post's time; fall back to earliest post time for
+-- the 2 threads (of 278) that lack an op_post tag. GROUP BY absorbs duplicate
+-- tag rows. Verified: no thread has >1 distinct OP post, and today OP time ==
+-- earliest post time everywhere — but do not rely on that; future corpora
+-- may not share the invariant.
+SELECT t.id AS thread_id,
+       COALESCE(MIN(CASE WHEN tg.name = 'op_post' THEN p.time END),
+                MIN(p.time)) AS started
+FROM thread t
+JOIN post p ON p.thread_id = t.id
+LEFT JOIN tag tg ON tg.post_id = p.id AND tg.name = 'op_post'
+GROUP BY t.id
+ORDER BY started ASC;   -- append LIMIT 2 for the L3 slice
+```
+
+Thread IDs are **opaque, not chronological**: the corpus mixes sources (thread id 12922 is story-thread 194 while id 31323984 is story-thread 20). This resolver yields **30265887** ("Banished Quest"), **30305969**, then **30392208** ("Banished Quest 3") — matching where v1's glossary sources start. The story-reading predicate (`story_post`) is applied separately when streaming posts within each thread.
 
 Catches what fakes can't: tool-call format drift, paraphrased quotes, context-assembly ordering bugs. Costs ~2 threads of tokens. **On-demand only, never a CI gate** — it spends subscription budget and is non-deterministic; CI runs L0–L2 + L4 replays.
 
