@@ -42,7 +42,7 @@ Run the real pipeline with the real budget model on the **two chronologically-fi
 - entries/1k posts inside the agreed band (calibrated after first run)
 - resume consistency: second launch does no duplicate work
 
-The slice is resolved by query, not hardcoded — reading order is `ORDER BY op_post.time ASC`. Thread IDs are **not** monotonic with story order: the corpus mixes sources (thread id 12922 is story-thread 194 while id 31323984 is story-thread 20). As of 2026-09-02 the first two threads are **30265887** ("Banished Quest") and **30305969** — matching where v1's glossary sources start.
+The slice is resolved by query, not hardcoded — reading order is `ORDER BY op_post.time ASC`. Thread IDs are **opaque, not chronological**: the corpus mixes sources (thread id 12922 is story-thread 194 while id 31323984 is story-thread 20). As of 2026-09-02 the first threads are **30265887** ("Banished Quest"), **30305969**, then **30392208** ("Banished Quest 3") — matching where v1's glossary sources start.
 
 Catches what fakes can't: tool-call format drift, paraphrased quotes, context-assembly ordering bugs. Costs ~2 threads of tokens. **On-demand only, never a CI gate** — it spends subscription budget and is non-deterministic; CI runs L0–L2 + L4 replays.
 
