@@ -4,7 +4,7 @@
 
 ## Guardrails (autonomous runs)
 
-1. **Never modify `banished.db`.** Code must open it `file:...?mode=ro`; L0 tests assert the reader connection is read-only.
+1. **Never modify `banished.db`.** Code must open it read-only via SQLite URI with the URI flag — `sqlite3.connect(f"file:{path}?mode=ro", uri=True)` (without `uri=True` the `file:` string is treated as a literal filename); L0 tests assert the reader connection is read-only.
 2. **No pushes to origin.** Commits are local on `feature/v2-foundation`; Matt pushes.
 3. **No token spend without approval.** L3 (real-model smoke) and any LLM-calling script require Matt's explicit go-ahead in the session. L0/L1/L2/L4 are free and always allowed.
 4. **Merge bar per task**: `pytest -q` green, `ruff check src tests` clean, tests mirror module structure.
@@ -17,9 +17,10 @@
 
 - `thread_order()`: the verified executable resolver from `dev-verification.md` (COALESCE OP-time query), yielding thread IDs chronologically.
 - `story_posts(thread_id)`: stream `story_post`-tagged posts, `ORDER BY time ASC`.
-- `scenes(thread_id)`: group maximal runs of consecutive (by time) `story_post` posts; scene = {thread_id, scene_index, post_ids, text}.
+- `batches(thread_id, batch_size)`: group the thread's story posts (time order) into batches of at most `batch_size` posts; batch = {thread_id, batch_index, post_ids, text}. **No gap heuristics in T1** — explicit size-based batches only; thread boundary always breaks a batch. Vote tallies/meta are simply excluded by the tag predicate. (Gap-based scene segmentation and its benchmark are deferred — see T8.)
 - Config: tag predicate (`story_post` default), DB path.
-- **Acceptance**: L0 tests on fabricated SQLite fixtures: ordering matches resolver, double-tagged posts handled, threads lacking `op_post` ordered by fallback, reader connection is read-only. `tests/test_corpus.py`.
+- **Acceptance**: L0 tests on fabricated SQLite fixtures: ordering matches resolver, double-tagged posts handled, threads lacking `op_post` ordered by fallback, batch boundaries respected (size cap, no cross-thread batches, empty threads), reader connection is read-only. `tests/test_corpus.py`.
+- **Status**: pending.
 
 ### T2 — Story log + merge tree (`memory/`)
 
@@ -28,6 +29,7 @@
 - `cover(T, budget)`: budgeted age-decaying digest (OptMem algorithm); `forget(block)` + rebuild.
 - Merge function is injected (`Callable[[list[str]], str]`) — LLM-free in tests.
 - **Acceptance**: L0 property tests from `dev-verification.md` (cover ≤ budget, aligned powers of two, granularity non-increasing toward T, rebuild-from-log equivalence, forget/rebuild consistency). `tests/test_story_log.py`.
+- **Status**: pending.
 
 ### T3 — Glossary store + quote gate (`glossary/`)
 
@@ -35,6 +37,7 @@
 - `propose_entry` / `update_entry` / `add_alias` semantics; **quote gate**: quote must be a verbatim substring of the cited post AND contain the term/alias, or the write is rejected.
 - No delete/UPDATE path. Merges union evidence (API exists, human-invoked).
 - **Acceptance**: L0 incl. adversarial fixtures (paraphrased quote, quote spanning posts, unknown term alias, unicode/case). `tests/test_glossary.py`.
+- **Status**: pending.
 
 ### T4 — Injection layer (`inject/`)
 
@@ -42,12 +45,14 @@
 - Hard token budget (default 15% of configured context), priority = recently-updated then shortest, recursion ≤1.
 - Pure function: `(scene_text, entries, budget) -> injected_cards`; token counter injected.
 - **Acceptance**: L0 budget/drop-order/recursion tests. `tests/test_injection.py`.
+- **Status**: pending.
 
 ### T5 — LLM client seam (`llm/`)
 
 - `ChatClient` protocol: `chat(messages, tools) -> response`.
 - `OpenAICompatibleClient` (v1 AgentClient shape: retries/backoff/timeout) + `ScriptedModel` (fixture-replay) + recording wrapper for L4.
 - **Acceptance**: L2 stub-server tests (5xx, malformed JSON, schema drift); ScriptedModel replays fixtures exactly. `tests/test_llm.py`.
+- **Status**: pending.
 
 ### T6 — Runner (`runner.py`, `tools/`)
 
@@ -55,11 +60,32 @@
 - Thread close: issue due merge calls; periodic re-verification queue hook (stub OK).
 - Resume from `run_state` mid-thread.
 - **Acceptance**: L1 end-to-end — ScriptedModel + fabricated 3-thread corpus, all L1 assertions from `dev-verification.md` incl. adversarial fixtures and kill/resume. `tests/test_runner.py`.
+- **Status**: pending.
 
 ### T7 — Verify CLI (`cli.py`)
 
 - `annotator verify <db>`: post-run invariant checker (quote validity vs corpus, provenance coverage, backlink integrity, budget compliance, resume-consistency probe). Doubles as dashboard v1.
 - **Acceptance**: L0 tests: checker passes T6's fabricated run output, fails on seeded violations (one per invariant). `tests/test_verify.py`.
+- **Status**: pending.
+
+### T8 — Scene segmentation heuristic (deferred, bounded)
+
+- Investigate whether gap-based scenes (splitting batches at large post/time gaps) beat fixed-size batches. Requires a bounded benchmark over `banished.db` gap distributions plus a quality check on L3 output. **Not started without Matt's go-ahead; T1–T7 must not depend on it.**
+- **Status**: deferred.
+
+
+## Repository readiness vs. driver
+
+This repo provides the *inputs* to an overnight run: sequenced tasks, guardrails, merge bar, design docs, durable state in git (commits + worklog). It does **not** contain an autonomous driver. There is no scheduler/launcher, no task-state lease mechanism, no restart handler, and no automated escalation path in-repo.
+
+The driver is **an externally launched agent session** (e.g. `omp` started by Matt, or a cron/loop wrapper he sets up) executing this protocol:
+
+1. Read SPEC, design docs, this plan, recent worklog (AGENTS.md session protocol).
+2. Pick the first task whose Status is exactly `pending` — skip `deferred` (T8) and everything under "Gated on Matt"; flip it to `in progress` in the same commit that starts it. If no `pending` task remains, STOP: the autonomous scope is complete.
+3. Implement + tests; merge bar (`pytest -q`, `ruff check src tests`); commit; flip Status to `done`.
+4. Worklog entry; continue to next task or end session (context limits).
+
+Escalation is manual-by-design: the driver stops at any Gated item, any guardrail 5 stop condition, or any merge-bar failure it cannot fix in-scope — and documents the blocker in the worklog. Durable task state = this file's Status lines + git history; per-task verification = the merge bar at each commit.
 
 ## Gated on Matt (not autonomous)
 
