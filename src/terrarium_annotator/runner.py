@@ -97,7 +97,7 @@ class Runner:
         """
         threads = self.corpus.thread_order()
         save_run_meta(self.conn, "config", json.dumps(asdict(self.config)))
-        resume = load_run_state(self.conn)
+        resume = load_run_state(self.conn, self.config.pass_id)
         resume_idx = 0
         resume_batch = 0
         if resume is not None:

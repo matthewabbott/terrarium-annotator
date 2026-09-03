@@ -126,7 +126,8 @@ def make_runner(corpus_path, annotator_path, model, **cfg):
     memory = StoryLog(conn)
     glossary = GlossaryStore(conn, corpus.post_body)
     cfg.setdefault("batch_size", 2)
-    config = RunnerConfig(pass_id="test-pass", **cfg)
+    cfg.setdefault("pass_id", "test-pass")
+    config = RunnerConfig(**cfg)
     return Runner(corpus, memory, glossary, model, conn, config), conn
 
 
@@ -158,7 +159,7 @@ class TestEndToEnd:
         assert runner.memory._settled(0, 4) is not None
 
         # Checkpoint at the end of thread 103.
-        assert load_run_state(conn) == (103, 1)
+        assert load_run_state(conn, "test-pass") == (103, 1)
 
         # Transcript has an assistant row per batch (plus tool rows).
         assistants = conn.execute(
@@ -301,7 +302,7 @@ class TestL1Assertions:
             corpus_path, annotator_path, ScriptedModel(list(SCRIPT[:2]))
         )
         runner_a.run(max_batches=1)
-        assert load_run_state(conn) == (101, 1)
+        assert load_run_state(conn, "test-pass") == (101, 1)
 
         # Run B resumes: must process exactly the remaining batches.
         runner_b, conn = make_runner(
@@ -314,6 +315,27 @@ class TestL1Assertions:
         assert len(set(gists)) == 4  # no reprocessed batch
         entry = runner_b.glossary.get("Vys")
         assert len(runner_b.glossary.revisions(entry.id)) == 2
+
+    def test_new_pass_id_starts_fresh(self, env):
+        """A checkpoint belongs to its pass; a different pass_id restarts."""
+        corpus_path, annotator_path = env
+        runner_a, conn = make_runner(
+            corpus_path, annotator_path, ScriptedModel(list(SCRIPT[:2]))
+        )
+        runner_a.run(max_batches=1)
+        assert load_run_state(conn, "pass-b") is None  # not pass-a's checkpoint
+
+        # A pass-b runner therefore starts at batch 0, not batch 1.
+        runner_b, _ = make_runner(
+            corpus_path,
+            annotator_path,
+            ScriptedModel(list(SCRIPT[:2])),
+            pass_id="pass-b",
+        )
+        runner_b.run(max_batches=1)
+        # pass-b processed batch 0 again: its gist text was recorded twice.
+        gists = [e.gist for e in runner_b.memory.slice(0, 10)]
+        assert gists.count("Mik channels Vys into the cloak.") == 2
 
 
 class TestDispatcher:

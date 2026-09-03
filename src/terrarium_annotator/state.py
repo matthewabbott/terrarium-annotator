@@ -72,12 +72,19 @@ def save_run_state(
     conn.commit()
 
 
-def load_run_state(conn: sqlite3.Connection) -> tuple[int, int] | None:
-    """(thread_id, batch_index) of the next unprocessed batch, if any."""
+def load_run_state(
+    conn: sqlite3.Connection, pass_id: str | None = None
+) -> tuple[int, int] | None:
+    """(thread_id, batch_index) of the next unprocessed batch, if any.
+
+    With `pass_id`, returns the checkpoint only if it belongs to that
+    pass — a new pass must start fresh, not resume another pass's run."""
     row = conn.execute(
-        "SELECT thread_id, batch_index FROM run_state WHERE id = 1"
+        "SELECT thread_id, batch_index, pass_id FROM run_state WHERE id = 1"
     ).fetchone()
-    return (row[0], row[1]) if row else None
+    if row is None or (pass_id is not None and row[2] != pass_id):
+        return None
+    return (row[0], row[1])
 
 
 def save_run_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
