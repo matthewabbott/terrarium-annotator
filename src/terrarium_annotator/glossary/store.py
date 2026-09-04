@@ -19,6 +19,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
+from terrarium_annotator.glossary.gate import is_generic_term
 from terrarium_annotator.glossary.models import (
     EPISTEMIC_MODES,
     Entry,
@@ -76,6 +77,15 @@ CREATE TABLE IF NOT EXISTS entry_source(
     quote TEXT NOT NULL,
     mode TEXT NOT NULL DEFAULT 'narrated'
         CHECK (mode IN ('narrated', 'claimed', 'inferred')),
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS deferred_candidate(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    term TEXT NOT NULL,
+    term_normalized TEXT NOT NULL,
+    quote TEXT NOT NULL,
+    post_id INTEGER NOT NULL,
+    thread_id INTEGER,
     created_at TEXT NOT NULL
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS entry_fts USING fts5(
@@ -314,6 +324,20 @@ class GlossaryStore:
             "INSERT INTO entry_fts(rowid, term, gloss) VALUES (?, ?, ?)",
             (entry_id, term, gloss),
         )
+        if is_generic_term(term):
+            # Shadow gate (design §4): log the would-be deferral; never block.
+            self._conn.execute(
+                "INSERT INTO deferred_candidate(term, term_normalized, quote,"
+                " post_id, thread_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    term,
+                    _norm(term),
+                    evidence[0].quote,
+                    evidence[0].post_id,
+                    provenance.thread_id,
+                    now,
+                ),
+            )
         self._conn.commit()
         return self.get(entry_id)
 
@@ -510,6 +534,13 @@ class GlossaryStore:
         self._conn.execute("DELETE FROM entry WHERE id = ?", (drop.id,))
         self._conn.commit()
         return self.get(keep.id)
+
+    def deferred_candidates(self) -> list[tuple]:
+        """Shadow-gate log rows (id, term, quote, post_id, thread_id)."""
+        return self._conn.execute(
+            "SELECT id, term, quote, post_id, thread_id, created_at "
+            "FROM deferred_candidate ORDER BY id"
+        ).fetchall()
 
     # ------------------------------------------------------ internals
 

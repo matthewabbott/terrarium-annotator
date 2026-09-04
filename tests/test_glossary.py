@@ -24,6 +24,7 @@ POSTS = {
     200: "Soma channeled vys into the cloak. Nothing happened.",
     300: "Archmagos Suresh welcomed the Master vatis to the library.",
     400: " unrelated post about markets and silver ",
+    500: "They whispered among themselves in that strange language.",
 }
 
 PROV = Provenance(thread_id=1, pass_id="test-pass", log_seq=0, tree_version=0)
@@ -317,3 +318,40 @@ class TestRenameRevert:
         propose(store)
         with pytest.raises(GlossaryError, match="no revision"):
             store.revert_entry("Vatis", 99, Provenance(thread_id=1, pass_id="t"))
+
+
+class TestShadowGate:
+    def test_generic_term_logged_but_created(self, store):
+        e = propose(
+            store,
+            term="strange language",
+            evidence=[Evidence(500, "in that strange language")],
+        )
+        assert store.get(e.id).term == "strange language"  # never blocked
+        rows = store.deferred_candidates()
+        assert len(rows) == 1 and rows[0][1] == "strange language"
+        assert rows[0][3] == 500  # post_id recorded
+
+    def test_specific_terms_not_logged(self, store):
+        propose(store)  # "Vatis" — uppercase
+        store.propose_entry(
+            term="खुनी",
+            gloss="Brand: slayer.",
+            evidence=[Evidence(100, "their Vys reserves nearly spent")],
+            provenance=PROV,
+            keys=("Vys",),
+        )
+        assert store.deferred_candidates() == []
+
+
+class TestGateHeuristic:
+    def test_generic_detection(self):
+        from terrarium_annotator.glossary.gate import is_generic_term
+
+        assert is_generic_term("strange language")
+        assert is_generic_term("old fort")
+        assert not is_generic_term("Vys")
+        assert not is_generic_term("खुनी")
+        assert not is_generic_term("Rikāmā Rahivāsī")
+        assert not is_generic_term("District 9")
+        assert not is_generic_term("")
