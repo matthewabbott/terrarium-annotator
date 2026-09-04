@@ -36,3 +36,8 @@ The two junk classes from the L3 smoke report: `strange language`/`old fort` (ga
 
 - The wiring goal is complete; the admission-policy question is now evidence-backed: **lexical heuristics fail on this corpus; deferral must be recurrence- or critic-driven.**
 - Entries to eyeball: `data/annotator-shadow.db` (58 entries, threads 3–5) via `terrarium-annotator chat --corpus-db banished.db --annotator-db data/annotator-shadow.db`.
+
+## Post-goal addendum (advisory review)
+
+- Harvest parser gained mocked unit tests (labels, sub-namespaces, anomaly preservation, partial failure) and a namespace-required filter; gold-set.json verified unpolluted (0 namespace-less rows) without re-harvest.
+- Schema-versioning note: `data/annotator.db` (smoke, threads 1–2) predates the `entry_source.mode` column; `data/annotator-shadow.db` (threads 3–5) was created after it. No DB contains legacy rows under the mode default — writes supply mode explicitly, and old-schema DBs fail loudly (unknown column) rather than silently defaulting. If a future pass ever reuses an old DB, expect that loud failure; the fix is a fresh DB per schema epoch (current policy).

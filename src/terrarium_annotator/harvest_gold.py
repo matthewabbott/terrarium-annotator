@@ -57,7 +57,7 @@ class LinkParser(HTMLParser):
             path = m.group(1)
             *ns_parts, slug = path.split("/")
             namespace = "/".join(ns_parts)
-        if namespace + "/" in SKIP_PREFIXES or not slug:
+        if not namespace or namespace + "/" in SKIP_PREFIXES or not slug:
             return
         self._open = (namespace, slug)
         self._text = []
