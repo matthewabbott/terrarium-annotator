@@ -30,6 +30,3 @@ The wiki is **DokuWiki**. Pages live in type-namespaces: `characters`, `location
 3. **Fact vs. speculation separation** (Sadik's Abilities section) is a house convention worth encoding: definitions should mark confidence — aligns with our `tentative`/`confirmed` status.
 4. Namespace = tag; disambiguation suffix (`Dawn (character)`) maps to choosing the right namespace.
 
-## Gold set (added 2026-09-03)
-
-Thread pages 3–40 exist and follow the format above (verified: thread/3, thread/20, thread/40). Their summaries' `[links]` are human-curated "terms worth an entry" per thread — a partial **gold-standard entry list** for measuring recall/precision of our generated glossary (dev-verification L5). Harvest by scraping the thread pages and extracting link targets. Note the links use namespace slugs (`characters:mik`, `objects:oud`), which also seeds our tag→namespace mapping.

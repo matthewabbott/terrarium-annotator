@@ -52,6 +52,7 @@ The Elaudian case is exactly this: "known for elaborate constructions" was an in
 
 Terms differ by frequency and importance: Vys (every thread), El-Amin/Elaudian (recur later, matter then), Well Flower (one-off texture). Serving should respect that without *losing* anything:
 
+
 - **Salience score** per entry, computed from data we already store: `log(1 + mention_count)` (from `entry_source`) × recency decay (last cited batch vs current) × tag prior (mechanic/character > item/texture).
 - **Injection**: triggered-by-current-batch always injects (a dormant term reappearing must resurface its card — non-negotiable); under budget pressure, drop by lowest salience (replacing today's recency-then-shortest).
 - **The graveyard** (Matt): cold storage is a visible place, not a void. `cold` (single-mention, never-updated, stale-N-threads) and retracted entries live there — excluded from recursion and search defaults, but still exact-trigger injectable and still in the wiki export.
@@ -66,6 +67,8 @@ First-read vs reread asymmetry is the core insight: `strange language` is unlink
 - **Promotion**: if a deferred surface form recurs in a later batch (cheap trigger scan), it promotes to a real entry — the second sighting is evidence of referential stability.
 - **Reread linking**: a researcher pass over the corpus with the complete glossary turns known descriptors into *aliases* of canonical entries (entity-linking task), not new entries.
 - **Sub-entry split rule** (Aghtaki brands): a nested term earns its own entry when it appears in a batch *without* its parent term, or recurs under a second referent (Scourge on a new character). Both are measurable from entry_source/thread data — no judgment call needed at write time.
+
+**Shadow mode first** (review-driven caution): the gate launches non-blocking — it logs which proposals it *would* defer, and we compare those against the thread-page gold set (dev-verification L5) before any write is actually blocked. A rigid heuristic could suppress valid coined/common-noun terms (e.g. a real mechanic named plainly); calibrate precision/recall in shadow, then enforce.
 
 ## 5. History: diffs, reverts, and the git question
 
