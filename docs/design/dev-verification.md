@@ -72,7 +72,7 @@ Record L3's raw request/response pairs as first-class fixtures; replay them dete
 
 `v2-architecture.md` §6: gold-set P/R/F1, faithfulness, trigger-utility, anti-baseline comparison. Not part of the dev loop.
 
-Gold-set source (added 2026-09-03): the live wiki's thread pages 3–40 (`steelbea.me/banished/wiki/thread/N`) contain human-curated entity links per thread (`characters:mik`, `objects:oud`, …). Harvesting those links yields a partial gold-standard entry list for recall/precision measurement without hand-labeling. Harvest/format details in `wiki-format.md` ("Gold set").
+Gold-set source (added 2026-09-03): the live wiki's thread pages 3–40 (`steelbea.me/banished/wiki/thread/N`, format verified on thread/3, /20, /40) contain human-curated entity links per thread. Harvest by scraping those pages and extracting link targets — a partial gold-standard entry list for recall/precision measurement without hand-labeling. The links use namespace slugs (`characters:mik`, `objects:oud`), which also seeds our tag→namespace mapping.
 
 
 ## Dev-loop contract (for coding agents building v2)
