@@ -19,7 +19,13 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
-from terrarium_annotator.glossary.models import Entry, Evidence, Provenance, Revision
+from terrarium_annotator.glossary.models import (
+    EPISTEMIC_MODES,
+    Entry,
+    Evidence,
+    Provenance,
+    Revision,
+)
 
 MAX_QUOTE_CHARS = 2000  # quotes are evidence snippets, not whole posts
 
@@ -57,6 +63,8 @@ CREATE TABLE IF NOT EXISTS revision(
     log_seq INTEGER,
     pass_id TEXT NOT NULL,
     tree_version INTEGER,
+    note TEXT,
+    reverts INTEGER REFERENCES revision(id),
     created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS entry_source(
@@ -66,6 +74,8 @@ CREATE TABLE IF NOT EXISTS entry_source(
     thread_id INTEGER,
     post_id INTEGER NOT NULL,
     quote TEXT NOT NULL,
+    mode TEXT NOT NULL DEFAULT 'narrated'
+        CHECK (mode IN ('narrated', 'claimed', 'inferred')),
     created_at TEXT NOT NULL
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS entry_fts USING fts5(
@@ -121,6 +131,11 @@ class GlossaryStore:
     ) -> None:
         if not evidence:
             raise QuoteRejected("at least one evidence quote is required")
+        for ev in evidence:
+            if ev.mode not in EPISTEMIC_MODES:
+                raise GlossaryError(
+                    f"unknown epistemic mode {ev.mode!r} (post {ev.post_id})"
+                )
         needles = (term, *aliases)
         for ev in evidence:
             quote = ev.quote
@@ -214,7 +229,7 @@ class GlossaryStore:
     def revisions(self, entry_id: int) -> list[Revision]:
         rows = self._conn.execute(
             "SELECT id, entry_id, gloss, thread_id, batch_lo, batch_hi, "
-            "log_seq, pass_id, tree_version, created_at FROM revision "
+            "log_seq, pass_id, tree_version, created_at, note, reverts FROM revision "
             "WHERE entry_id = ? ORDER BY id",
             (entry_id,),
         )
@@ -232,6 +247,8 @@ class GlossaryStore:
                     tree_version=r[8],
                 ),
                 created_at=r[9],
+                note=r[10],
+                reverts=r[11],
             )
             for r in rows
         ]
@@ -364,8 +381,8 @@ class GlossaryStore:
         )
         self._conn.execute(
             "INSERT INTO entry_source(entry_id, revision_id, thread_id,"
-            " post_id, quote, created_at) VALUES (?, NULL, NULL, ?, ?, ?)",
-            (entry.id, evidence.post_id, evidence.quote, _now()),
+            " post_id, quote, mode, created_at) VALUES (?, NULL, NULL, ?, ?, ?, ?)",
+            (entry.id, evidence.post_id, evidence.quote, evidence.mode, _now()),
         )
         self._conn.commit()
 
@@ -377,6 +394,93 @@ class GlossaryStore:
             (_now(), entry.id),
         )
         self._conn.commit()
+
+    def rename_entry(
+        self, term_or_id: str | int, new_term: str, provenance: Provenance
+    ) -> Entry:
+        """Human/critic retitle: new canonical term, old term auto-aliased,
+        revision appended with a note. Not quote-gated — a good title need
+        not appear verbatim in the corpus ('old fort' → 'Old Silver Mint')."""
+        entry = self.get(term_or_id)
+        new_term = new_term.strip()
+        if not new_term:
+            raise GlossaryError("new term must be non-empty")
+        self._check_surface_free(new_term)
+        now = _now()
+        self._conn.execute(
+            "INSERT INTO entry_fts(entry_fts, rowid, term, gloss) "
+            "VALUES ('delete', ?, ?, ?)",
+            (entry.id, entry.term, entry.gloss),
+        )
+        self._conn.execute(
+            "UPDATE entry SET term = ?, term_normalized = ?, updated_at = ? "
+            "WHERE id = ?",
+            (new_term, _norm(new_term), now, entry.id),
+        )
+        self._conn.execute(
+            "INSERT OR IGNORE INTO entry_alias VALUES (?, ?, ?)",
+            (entry.id, entry.term, _norm(entry.term)),
+        )
+        self._insert_revision(
+            entry.id,
+            entry.gloss,
+            provenance,
+            now,
+            note=f"renamed from {entry.term!r}",
+        )
+        self._conn.execute(
+            "INSERT INTO entry_fts(rowid, term, gloss) VALUES (?, ?, ?)",
+            (entry.id, new_term, entry.gloss),
+        )
+        self._conn.commit()
+        return self.get(entry.id)
+
+    def revert_entry(
+        self, term_or_id: str | int, revision_id: int, provenance: Provenance
+    ) -> Revision:
+        """git-revert semantics: append a new revision restoring an old gloss.
+        Evidence is copied from the restored revision; nothing is deleted."""
+        entry = self.get(term_or_id)
+        target = next(
+            (r for r in self.revisions(entry.id) if r.id == revision_id), None
+        )
+        if target is None:
+            raise GlossaryError(f"entry {entry.id} has no revision {revision_id}")
+        now = _now()
+        new_id = self._insert_revision(
+            entry.id,
+            target.gloss,
+            provenance,
+            now,
+            note=f"revert to r{revision_id}",
+            reverts=revision_id,
+        )
+        rows = self._conn.execute(
+            "SELECT post_id, quote, mode FROM entry_source "
+            "WHERE entry_id = ? AND revision_id = ?",
+            (entry.id, revision_id),
+        ).fetchall()
+        for post_id, quote, mode in rows:
+            self._conn.execute(
+                "INSERT INTO entry_source(entry_id, revision_id, thread_id,"
+                " post_id, quote, mode, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (entry.id, new_id, provenance.thread_id, post_id, quote, mode, now),
+            )
+        self._conn.execute(
+            "UPDATE entry SET gloss = ?, updated_at = ? WHERE id = ?",
+            (target.gloss, now, entry.id),
+        )
+        self._conn.execute(
+            "INSERT INTO entry_fts(entry_fts, rowid, term, gloss) "
+            "VALUES ('delete', ?, ?, ?)",
+            (entry.id, entry.term, entry.gloss),
+        )
+        self._conn.execute(
+            "INSERT INTO entry_fts(rowid, term, gloss) VALUES (?, ?, ?)",
+            (entry.id, entry.term, target.gloss),
+        )
+        self._conn.commit()
+        return self.revisions(entry.id)[-1]
 
     def merge_entries(self, survivor: str | int, merged: str | int) -> Entry:
         """Human-invoked merge: all aliases, sources, and revisions of the
@@ -410,12 +514,19 @@ class GlossaryStore:
     # ------------------------------------------------------ internals
 
     def _insert_revision(
-        self, entry_id: int, gloss: str, prov: Provenance, now: str
+        self,
+        entry_id: int,
+        gloss: str,
+        prov: Provenance,
+        now: str,
+        note: str | None = None,
+        reverts: int | None = None,
     ) -> int:
         cur = self._conn.execute(
             "INSERT INTO revision(entry_id, gloss, thread_id, batch_lo,"
-            " batch_hi, log_seq, pass_id, tree_version, created_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " batch_hi, log_seq, pass_id, tree_version, note, reverts,"
+            " created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 entry_id,
                 gloss,
@@ -425,6 +536,8 @@ class GlossaryStore:
                 prov.log_seq,
                 prov.pass_id,
                 prov.tree_version,
+                note,
+                reverts,
                 now,
             ),
         )
@@ -443,8 +556,16 @@ class GlossaryStore:
         for ev in evidence:
             self._conn.execute(
                 "INSERT INTO entry_source(entry_id, revision_id, thread_id,"
-                " post_id, quote, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (entry_id, revision_id, prov.thread_id, ev.post_id, ev.quote, now),
+                " post_id, quote, mode, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    entry_id,
+                    revision_id,
+                    prov.thread_id,
+                    ev.post_id,
+                    ev.quote,
+                    ev.mode,
+                    now,
+                ),
             )
 
     def close(self) -> None:

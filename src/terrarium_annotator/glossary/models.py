@@ -9,13 +9,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+EPISTEMIC_MODES = ("narrated", "claimed", "inferred")
+
 
 @dataclass(frozen=True)
 class Evidence:
-    """A quote grounding a definition in a specific corpus post."""
+    """A quote grounding a definition in a specific corpus post.
+
+    mode: epistemic status of the claim the quote supports —
+    'narrated' (text states it), 'claimed' (character/rumor), 'inferred'.
+    """
 
     post_id: int
     quote: str
+    mode: str = "narrated"
 
 
 @dataclass(frozen=True)
@@ -53,3 +60,5 @@ class Revision:
     gloss: str
     provenance: Provenance
     created_at: str
+    note: str | None = None  # e.g. "renamed from X", "revert to r3"
+    reverts: int | None = None  # revision id this revision restores

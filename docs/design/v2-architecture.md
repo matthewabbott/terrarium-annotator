@@ -188,11 +188,12 @@ The v1 glossary export (`data/exports/glossary-v2-full.json`, 3,623 entries) is 
 | Table | Contents |
 |-------|----------|
 | `entry` | id, term, term_normalized, keys, gloss, tags, status(tentative/confirmed), pass_id, timestamps |
-| `revision` | id, entry_id, body, pass_id, thread_id, scene_range, log_seq, tree_version, created_at — append-only |
-| `entry_source` | entry_id, revision_id, thread_id, post_id, scene_index, quote |
+| `revision` | id, entry_id, body, pass_id, thread_id, scene_range, log_seq, tree_version, note, reverts — append-only |
+| `entry_source` | entry_id, revision_id (NULL for alias registrations), thread_id, post_id, scene_index, quote, **mode** (`narrated`/`claimed`/`inferred` — critic-salience-epistemics §2) |
 | `story_log` | seq, thread_id, scene_range, gist, created_at — append-only |
 | `story_tree` | lo, hi (log seq range), summary, tree_version — **write-once**, never rewritten in place |
 | `transcript` | log_seq, pass_id, role, content, tool_calls — per-scene agent output, append-only |
+| `deferred_candidate` | (planned, shadow gate) term, quote, post_id, thread_id, created_at — would-be entries the specificity gate would defer; logged, never blocked, until calibration |
 | `run_state` | current thread/scene position |
 
 FTS5 over `entry(term, gloss)` for card lookup; no vector index until the duplicate-detection queue needs one (embedding blocking is an offline audit concern, not a read-path concern).

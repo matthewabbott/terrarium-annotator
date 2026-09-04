@@ -48,6 +48,12 @@ _EVIDENCE_PROP = {
         "properties": {
             "post_id": {"type": "integer"},
             "quote": {"type": "string"},
+            "mode": {
+                "type": "string",
+                "enum": ["narrated", "claimed", "inferred"],
+                "description": "epistemic status: text states it / a "
+                "character claims it / you infer it",
+            },
         },
         "required": ["post_id", "quote"],
         "additionalProperties": False,
@@ -92,6 +98,10 @@ TOOL_SCHEMAS = [
                 "properties": {
                     "post_id": {"type": "integer"},
                     "quote": {"type": "string"},
+                    "mode": {
+                        "type": "string",
+                        "enum": ["narrated", "claimed", "inferred"],
+                    },
                 },
                 "required": ["post_id", "quote"],
                 "additionalProperties": False,
@@ -188,7 +198,11 @@ class ToolDispatcher:
             self._glossary.add_alias(
                 a["term"],
                 a["alias"],
-                evidence=Evidence(post_id=int(ev["post_id"]), quote=ev["quote"]),
+                evidence=Evidence(
+                    post_id=int(ev["post_id"]),
+                    quote=ev["quote"],
+                    mode=ev.get("mode", "narrated"),
+                ),
             )
             return {"alias": a["alias"]}
         if call.name == "fetch_entry":
@@ -215,7 +229,14 @@ class ToolDispatcher:
 
     @staticmethod
     def _evidence_list(raw: list[dict]) -> list[Evidence]:
-        return [Evidence(post_id=int(e["post_id"]), quote=e["quote"]) for e in raw]
+        return [
+            Evidence(
+                post_id=int(e["post_id"]),
+                quote=e["quote"],
+                mode=e.get("mode", "narrated"),
+            )
+            for e in raw
+        ]
 
     def _fetch_entry(self, term: str) -> dict:
         entry = self._glossary.find(term)

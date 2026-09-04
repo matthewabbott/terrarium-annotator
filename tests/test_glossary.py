@@ -12,6 +12,7 @@ from terrarium_annotator.glossary import (
     MAX_QUOTE_CHARS,
     DuplicateEntry,
     Evidence,
+    GlossaryError,
     GlossaryStore,
     Provenance,
     QuoteRejected,
@@ -234,3 +235,85 @@ class TestMergeAndStatus:
         propose(store)
         store.confirm("Vatis")
         assert store.get("Vatis").status == "confirmed"
+
+
+class TestEpistemicMode:
+    def test_mode_stored_on_source(self, store):
+        e = propose(
+            store,
+            evidence=[Evidence(100, "The Vatis gathered at dusk", mode="claimed")],
+        )
+        rows = store._conn.execute(
+            "SELECT mode FROM entry_source WHERE entry_id = ?", (e.id,)
+        ).fetchall()
+        assert rows == [("claimed",)]
+
+    def test_default_mode_is_narrated(self, store):
+        e = propose(store)
+        rows = store._conn.execute(
+            "SELECT mode FROM entry_source WHERE entry_id = ?", (e.id,)
+        ).fetchall()
+        assert rows == [("narrated",)]
+
+    def test_unknown_mode_rejected(self, store):
+        with pytest.raises(GlossaryError, match="epistemic mode"):
+            propose(
+                store,
+                evidence=[Evidence(100, "The Vatis gathered at dusk", mode="vibes")],
+            )
+
+    def test_mode_in_db_must_be_valid(self, store):
+        # CHECK constraint: direct SQL with a bogus mode fails.
+        propose(store)
+        with pytest.raises(Exception, match="CHECK"):
+            store._conn.execute("UPDATE entry_source SET mode = 'vibes'")
+
+
+class TestRenameRevert:
+    def test_rename_aliasing_and_revision_note(self, store):
+        e = propose(store)
+        renamed = store.rename_entry(
+            e.id, "Vatis (order)", Provenance(thread_id=1, pass_id="t")
+        )
+        assert renamed.term == "Vatis (order)"
+        assert renamed.aliases == ("Vatis",)
+        assert store.find("vatis").id == e.id  # old title resolves
+        revs = store.revisions(e.id)
+        assert revs[-1].note == "renamed from 'Vatis'"
+
+    def test_rename_collision_rejected(self, store):
+        propose(store)
+        store.propose_entry(
+            term="Suresh",
+            gloss="The Archmagos.",
+            evidence=[Evidence(300, "Archmagos Suresh")],
+            provenance=PROV,
+        )
+        with pytest.raises(DuplicateEntry):
+            store.rename_entry("Vatis", "suresh", Provenance(thread_id=1, pass_id="t"))
+
+    def test_revert_restores_gloss_append_only(self, store):
+        e = propose(store)
+        store.update_entry(
+            "Vatis",
+            gloss="A degraded gloss.",
+            evidence=[Evidence(100, "The Vatis gathered at dusk")],
+            provenance=PROV,
+        )
+        rev = store.revert_entry("Vatis", 1, Provenance(thread_id=2, pass_id="t"))
+        assert rev.reverts == 1
+        assert rev.note == "revert to r1"
+        assert store.get("Vatis").gloss == "A mage of the Rhynian hierarchy."
+        revs = store.revisions(e.id)
+        assert len(revs) == 3  # history retained
+        # Evidence carried over to the revert revision.
+        rows = store._conn.execute(
+            "SELECT COUNT(*) FROM entry_source WHERE revision_id = ?",
+            (rev.id,),
+        ).fetchone()
+        assert rows[0] == 1
+
+    def test_revert_unknown_revision_rejected(self, store):
+        propose(store)
+        with pytest.raises(GlossaryError, match="no revision"):
+            store.revert_entry("Vatis", 99, Provenance(thread_id=1, pass_id="t"))
