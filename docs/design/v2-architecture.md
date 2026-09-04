@@ -187,14 +187,16 @@ The v1 glossary export (`data/exports/glossary-v2-full.json`, 3,623 entries) is 
 
 | Table | Contents |
 |-------|----------|
-| `entry` | id, term, term_normalized, keys, gloss, tags, status(tentative/confirmed), pass_id, timestamps |
-| `revision` | id, entry_id, body, pass_id, thread_id, scene_range, log_seq, tree_version, note, reverts, created_at — append-only |
-| `entry_source` | entry_id, revision_id (NULL for alias registrations), thread_id, post_id, scene_index, quote, **mode** (`narrated`/`claimed`/`inferred` — critic-salience-epistemics §2) |
-| `story_log` | seq, thread_id, scene_range, gist, created_at — append-only |
+| `entry` | id, term, term_normalized, gloss, status(tentative/confirmed), pass_id, created_at, updated_at (+ entry_alias, entry_tag side tables) |
+| `revision` | id, entry_id, gloss, thread_id, batch_lo, batch_hi, log_seq, pass_id, tree_version, note, reverts, created_at — append-only |
+| `entry_source` | id, entry_id, revision_id (NULL for alias registrations), thread_id, post_id, quote, mode (`narrated`/`claimed`/`inferred` — critic-salience-epistemics §2), created_at |
+| `story_log` | seq, thread_id, batch_lo, batch_hi, gist, created_at — append-only |
 | `story_tree` | lo, hi (log seq range), summary, tree_version — **write-once**, never rewritten in place |
-| `transcript` | log_seq, pass_id, role, content, tool_calls — per-scene agent output, append-only |
-| `deferred_candidate` | (shadow-only) term, quote, post_id, thread_id, created_at — proposals the specificity gate would defer; logged, never blocked (calibration verdict 2026-09-04: lexical heuristic NO-GO, stays shadow) |
-| `run_state` | current thread/scene position |
+| `transcript` | id, pass_id, thread_id, batch_index, log_seq, role, content, tool_calls, created_at — per-batch agent output, append-only |
+| `deferred_candidate` | (shadow-only) id, term, term_normalized, quote, post_id, thread_id, created_at — proposals the specificity gate would defer; logged, never blocked (calibration verdict 2026-09-04: lexical heuristic NO-GO, stays shadow) |
+| `run_state` / `run_meta` | id=1 singleton: pass_id, thread_id, batch_index, updated_at / key-value run config |
+
+Column lists verified against the live schema (annotator-shadow.db, 2026-09-04).
 
 FTS5 over `entry(term, gloss)` for card lookup; no vector index until the duplicate-detection queue needs one (embedding blocking is an offline audit concern, not a read-path concern).
 
