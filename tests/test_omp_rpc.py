@@ -193,3 +193,31 @@ class TestEmptyResponseRetry:
             with pytest.raises(Exception, match="no assistant text"):
                 client.chat([{"role": "user", "content": "hi"}])
         assert counter.read_text() == "2"  # bounded: initial + one retry
+
+
+class TestTimeoutRetry:
+    def test_timeout_retries_once_with_fresh_process(self, tmp_path):
+        script = tmp_path / "script.json"
+        script.write_text(json.dumps([{"text": "late answer"}]))
+        counter = tmp_path / "counter"
+        with pytest.MonkeyPatch.context() as m:
+            m.setenv("FAKE_OMP_SCRIPT", str(script))
+            m.setenv("FAKE_OMP_COUNTER", str(counter))
+            m.setenv("FAKE_OMP_HANG_ONCE", "1")
+            client = OmpRpcClient(
+                command=[sys.executable, FAKE, "--no-tools"], timeout=1.5
+            )
+            resp = client.chat([{"role": "user", "content": "hi"}])
+        assert resp.content == "late answer"
+
+    def test_persistent_hang_raises_timeout(self, tmp_path):
+        script = tmp_path / "script.json"
+        script.write_text(json.dumps([{"text": "never"}]))
+        with pytest.MonkeyPatch.context() as m:
+            m.setenv("FAKE_OMP_SCRIPT", str(script))
+            m.setenv("FAKE_OMP_HANG", "1")
+            client = OmpRpcClient(
+                command=[sys.executable, FAKE, "--no-tools"], timeout=1.5
+            )
+            with pytest.raises(Exception, match="timed out"):
+                client.chat([{"role": "user", "content": "hi"}])

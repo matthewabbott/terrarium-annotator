@@ -2,11 +2,13 @@
 
 Script via env: FAKE_OMP_SCRIPT = path to JSON list of {"text": ...} or
 {"error": ...} entries, one per prompt. FAKE_OMP_TOOLS = JSON list for the
-get_state dumpTools field. FAKE_OMP_FAIL_SET_MODEL / FAKE_OMP_HANG trigger
-failure modes. FAKE_OMP_COUNTER = path to a counter file: because each
-OmpRpcClient chat() spawns a fresh process, the counter persists prompt
-position across processes (retries see the NEXT script entry).
-Emits unsolicited noise frames like the real server.
+get_state dumpTools field. FAKE_OMP_FAIL_SET_MODEL fails set_model.
+FAKE_OMP_HANG hangs every prompt; FAKE_OMP_HANG_ONCE hangs only the first
+prompt (cross-process, via the counter) — used for timeout-retry tests.
+FAKE_OMP_COUNTER = path to a counter file: each OmpRpcClient chat() spawns
+a fresh process, so the counter persists prompt position across processes
+(retries see the NEXT script entry). Emits unsolicited noise frames like
+the real server.
 """
 
 import json
@@ -58,6 +60,8 @@ def main():
     with open(os.environ["FAKE_OMP_SCRIPT"]) as f:
         script = json.loads(f.read())
     counter_path = os.environ.get("FAKE_OMP_COUNTER")
+    hang_always = bool(os.environ.get("FAKE_OMP_HANG"))
+    hang_once = bool(os.environ.get("FAKE_OMP_HANG_ONCE"))
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -75,17 +79,17 @@ def main():
             tools = json.loads(os.environ.get("FAKE_OMP_TOOLS", "[]"))
             respond(cmd.get("id"), "get_state", {"dumpTools": tools})
         elif ctype == "prompt":
-            if os.environ.get("FAKE_OMP_HANG"):
-                time.sleep(60)
-                continue
             calls = 0
             if counter_path and os.path.exists(counter_path):
                 with open(counter_path) as cf:
                     calls = int(cf.read().strip() or "0")
-            entry = script[min(calls, len(script) - 1)]
             if counter_path:
                 with open(counter_path, "w") as cf:
                     cf.write(str(calls + 1))
+            if hang_always or (hang_once and calls == 0):
+                time.sleep(60)
+                continue
+            entry = script[min(calls, len(script) - 1)]
             # Unsolicited frames, as the real server emits.
             sys.stdout.write(json.dumps({"type": "agent_start"}) + "\n")
             sys.stdout.write(

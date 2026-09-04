@@ -585,3 +585,9 @@ class TestCheckpointSafety:
             runner.run()
         assert load_run_state(conn, "test-pass") == (101, 1)
         assert runner.memory.log_len() == 1  # only batch 0's gist
+
+        diagnostics = conn.execute(
+            "SELECT COUNT(*) FROM transcript WHERE role = 'system'"
+            " AND content LIKE 'LLM call failed: EmptyResponseError%'"
+        ).fetchone()[0]
+        assert diagnostics == 1

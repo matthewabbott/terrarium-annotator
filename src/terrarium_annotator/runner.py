@@ -19,7 +19,7 @@ from math import log1p
 from terrarium_annotator.corpus import DEFAULT_BATCH_SIZE, Batch, CorpusReader, Thread
 from terrarium_annotator.glossary import GlossaryStore, Provenance
 from terrarium_annotator.inject import CardView, select_cards
-from terrarium_annotator.llm import ChatClient, ChatResponse
+from terrarium_annotator.llm import ChatClient, ChatClientError, ChatResponse
 from terrarium_annotator.memory import StoryLog
 from terrarium_annotator.state import (
     load_run_state,
@@ -244,12 +244,27 @@ class Runner:
         self._record(thread, batch, seq, "assistant", response)
 
     def _chat(self, messages: list[dict]) -> ChatResponse:
-        return self.llm.chat(
-            messages,
-            tools=self.dispatcher.schemas,
-            temperature=0.4,
-            max_tokens=self.config.max_response_tokens,
-        )
+        try:
+            return self.llm.chat(
+                messages,
+                tools=self.dispatcher.schemas,
+                temperature=0.4,
+                max_tokens=self.config.max_response_tokens,
+            )
+        except ChatClientError as exc:
+            # Record the failure distinctly before halting; run_state is
+            # untouched, so a later resume re-attempts this batch.
+            prov = self._provenance
+            record_transcript(
+                self.conn,
+                pass_id=self.config.pass_id,
+                thread_id=prov.thread_id if prov else -1,
+                batch_index=prov.batch_lo if prov and prov.batch_lo is not None else -1,
+                log_seq=None,
+                role="system",
+                content=f"LLM call failed: {type(exc).__name__}: {exc}",
+            )
+            raise
 
     @staticmethod
     def _tc_json(call) -> dict:

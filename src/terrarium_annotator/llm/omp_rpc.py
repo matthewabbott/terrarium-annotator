@@ -12,6 +12,10 @@ Design notes (goal boundaries):
 - Tool convention (ours, not omp's): the model emits
   `<tool_call>{"name": ..., "arguments": {...}}</tool_call>` blocks in its
   text; results return as `<tool_result name="...">...</tool_result>`.
+- Failure policy: each call gets `attempts` tries (default 2), each with a
+  fresh process, covering transient empty responses (reasoning models) and
+  RPC hangs (timeout). Persistent failure raises a distinct error class so
+  the caller can halt WITHOUT advancing run state.
 """
 
 from __future__ import annotations
@@ -29,18 +33,21 @@ from terrarium_annotator.llm.base import (
     ToolCall,
 )
 
+
+class EmptyResponseError(ChatClientError):
+    """Terminal response carried no assistant text (reasoning-model slip)."""
+
+
+class RPCTimeoutError(ChatClientError):
+    """No terminal frame within the per-attempt timeout."""
+
+
 TOOL_CONVENTION = """To call a tool, emit one or more blocks in your reply, exactly:
 <tool_call>{"name": "tool_name", "arguments": {"arg": "value"}}</tool_call>
 Arguments must be a JSON object. After tool results arrive, continue.
 
 Available tools:
 {schemas}"""
-
-
-class EmptyResponseError(ChatClientError):
-    """Terminal response carried no assistant text (reasoning-model slip).
-    Retried once per chat() call; raised persistently after that."""
-
 
 TOOL_CALL_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.DOTALL)
 
@@ -136,6 +143,7 @@ class OmpRpcClient:
         *,
         command: list[str] | None = None,
         timeout: float = 300.0,
+        attempts: int = 2,
         preflight: bool = True,
     ) -> None:
         self.model = model
@@ -146,6 +154,7 @@ class OmpRpcClient:
         if "--no-tools" not in self._command:
             raise ChatClientError("OmpRpcClient requires --no-tools in the command")
         self.timeout = timeout
+        self.attempts = attempts
         self._preflight_done = not preflight
 
     def chat(
@@ -154,37 +163,35 @@ class OmpRpcClient:
         tools: list[dict] | None = None,
         temperature: float = 0.4,
         max_tokens: int = 2048,
-        _attempts: int = 2,
     ) -> ChatResponse:
-        """One prompt against a fresh stateless RPC process. Empty terminal
-        responses (reasoning models occasionally end with no text) get ONE
-        retry with a fresh process; persistent empties raise
-        EmptyResponseError so the caller can halt without advancing state.
-        The retry budget is per call — no instance state.
-        """
+        """One prompt against a fresh stateless RPC process, retried up to
+        `self.attempts` times (fresh process each) on EmptyResponseError /
+        RPCTimeoutError. Retry budget is per call — no instance state."""
         prompt = serialize_messages(messages, tools)
-        proc = subprocess.Popen(
-            self._command,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-        )
-        try:
-            return self._exchange(proc, prompt)
-        except EmptyResponseError:
-            if _attempts <= 1:
-                raise
-            return self.chat(messages, tools, temperature, max_tokens, _attempts - 1)
-        finally:
+        last_error: ChatClientError | None = None
+        for _ in range(self.attempts):
+            proc = subprocess.Popen(
+                self._command,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+            )
             try:
-                proc.stdin.close()
-            except (BrokenPipeError, OSError):
-                pass  # process already gone
-            try:
-                proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+                return self._exchange(proc, prompt)
+            except (EmptyResponseError, RPCTimeoutError) as exc:
+                last_error = exc
+            finally:
+                try:
+                    proc.stdin.close()
+                except (BrokenPipeError, OSError):
+                    pass  # process already gone
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+        assert last_error is not None
+        raise last_error
 
     def _send(self, proc: subprocess.Popen, obj: dict) -> None:
         proc.stdin.write(json.dumps(obj) + "\n")
@@ -214,11 +221,11 @@ class OmpRpcClient:
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise ChatClientError(f"omp RPC timed out after {self.timeout}s")
+                raise RPCTimeoutError(f"omp RPC timed out after {self.timeout}s")
             try:
                 line = lines.get(timeout=remaining)
             except queue.Empty:
-                raise ChatClientError(f"omp RPC timed out after {self.timeout}s")
+                raise RPCTimeoutError(f"omp RPC timed out after {self.timeout}s")
             if line is None:
                 raise ChatClientError("omp RPC closed without completing")
             try:
