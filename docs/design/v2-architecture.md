@@ -194,7 +194,8 @@ The v1 glossary export (`data/exports/glossary-v2-full.json`, 3,623 entries) is 
 | `story_tree` | lo, hi (log seq range), summary, tree_version — **write-once**, never rewritten in place |
 | `transcript` | id, pass_id, thread_id, batch_index, log_seq, role, content, tool_calls, created_at — per-batch agent output, append-only |
 | `deferred_candidate` | (shadow-only) id, term, term_normalized, quote, post_id, thread_id, created_at — proposals the specificity gate would defer; logged, never blocked (calibration verdict 2026-09-04: lexical heuristic NO-GO, stays shadow) |
-| `run_state` / `run_meta` | id=1 singleton: pass_id, thread_id, batch_index, updated_at / key-value run config |
+| `run_state` | id=1 singleton: pass_id, thread_id, batch_index, updated_at |
+| `run_meta` | key, value — run configuration (budget compliance is verified against it) |
 
 Column lists verified against the live schema (annotator-shadow.db, 2026-09-04).
 
