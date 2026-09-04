@@ -9,8 +9,9 @@ Rules:
 - Recursion <= 1: injected cards' glosses may trigger one more round of
   matches, then it stops.
 - Hard token budget: overflow drops lowest-priority cards. Priority:
-  round-0 (directly triggered) before round-1 (recursive), then
-  recently-updated, then cheapest.
+  round-0 (directly triggered) before round-1 (recursive), then SALIENCE
+  (caller-computed: mention frequency x tag prior), then recently-updated,
+  then cheapest.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ class CardView:
     keys: tuple[str, ...]  # aliases; the term itself is always a trigger
     gloss: str
     updated_at: str  # ISO8601; lexicographic order = recency
+    salience: float = 0.0  # caller-computed: mentions x tag prior
 
 
 @dataclass(frozen=True)
@@ -78,9 +80,10 @@ def select_cards(
 
     candidates = [*(c for c in round0), *(c for c in round1)]
     depth = {id(c): 0 for c in round0} | {id(c): 1 for c in round1}
-    # Priority: round 0 first, then recently updated, then cheapest.
+    # Priority: round 0 first, then salience, then recency, then cheapest.
     candidates.sort(key=lambda c: len(c.gloss))  # stable: cheapest last key
     candidates.sort(key=lambda c: c.updated_at, reverse=True)
+    candidates.sort(key=lambda c: c.salience, reverse=True)
     candidates.sort(key=lambda c: depth[id(c)])
 
     selected: list[SelectedCard] = []

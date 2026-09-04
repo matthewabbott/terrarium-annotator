@@ -100,3 +100,27 @@ class TestSelection:
         b = card("Beta", keys=("Alph",))
         selected = select_cards("saw an X-Ray today", [a, b], 1000, count)
         assert [s.term for s in selected] == ["Alph"]
+
+
+class TestSalience:
+    def test_salience_beats_recency_under_pressure(self):
+        # Older but frequently-cited entry outranks a newer one-shot.
+        veteran = card("Veteran", gloss="g" * 40, updated="2026-01-01")
+        veteran = CardView(
+            term=veteran.term,
+            keys=veteran.keys,
+            gloss=veteran.gloss,
+            updated_at=veteran.updated_at,
+            salience=2.0,
+        )
+        newcomer = card("Newcomer", gloss="g" * 40, updated="2026-03-01")
+        scene = "Veteran Newcomer"
+        budget = count("Veteran: " + "g" * 40) + 1
+        selected = select_cards(scene, [veteran, newcomer], budget, count)
+        assert [s.term for s in selected] == ["Veteran"]
+
+    def test_dormant_card_resurfaces_on_trigger(self):
+        # Zero salience, ancient update — but the scene names it: injected.
+        dormant = card("Dormant", gloss="rare thing", updated="2020-01-01")
+        selected = select_cards("a Dormant appears", [dormant], 1000, count)
+        assert [s.term for s in selected] == ["Dormant"]

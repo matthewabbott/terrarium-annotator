@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import asdict, dataclass
+from math import log1p
 
 from terrarium_annotator.corpus import DEFAULT_BATCH_SIZE, Batch, CorpusReader, Thread
 from terrarium_annotator.glossary import GlossaryStore, Provenance
@@ -58,6 +59,7 @@ class RunnerConfig:
     pass_id: str = "dev"
     max_tool_rounds: int = 8
     max_response_tokens: int = 2048
+    tag_priors: dict[str, float] | None = None  # salience weight per tag
 
 
 class Runner:
@@ -152,6 +154,13 @@ class Runner:
             tree_version=self.memory.tree_version,
         )
 
+        tag_priors = cfg.tag_priors or {
+            "mechanic": 1.5,
+            "character": 1.5,
+            "faction": 1.3,
+            "location": 1.3,
+        }
+        mentions = self.glossary.mention_counts()
         cards = select_cards(
             batch.text,
             [
@@ -160,6 +169,8 @@ class Runner:
                     keys=e.aliases,
                     gloss=e.gloss,
                     updated_at=e.updated_at,
+                    salience=log1p(mentions.get(e.id, 0))
+                    * max((tag_priors.get(t, 1.0) for t in e.tags), default=1.0),
                 )
                 for e in self._all_entries()
             ],

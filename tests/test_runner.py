@@ -504,3 +504,47 @@ class TestDispatcherIntegrity:
         )
         assert result["ok"] is False
         assert "UNIQUE constraint" in result["error"]
+
+
+class TestRunnerSalience:
+    def test_mention_count_drives_injection_priority(self, env):
+        """Runner-level: more-cited entry survives budget pressure."""
+        corpus_path, annotator_path = env
+        corpus = CorpusReader(corpus_path)
+        conn = connect_annotator_db(annotator_path)
+        from terrarium_annotator.glossary import Evidence, Provenance
+
+        store = GlossaryStore(conn, corpus.post_body)
+        prov = Provenance(thread_id=101, pass_id="t")
+        store.propose_entry(
+            term="Vys",
+            gloss="Raw magical energy.",
+            evidence=[
+                Evidence(1001, "channeled Vys into the cloak"),
+                Evidence(1002, "The Vys flared blue."),
+            ],
+            provenance=prov,
+            tags=("mechanic",),
+        )
+        store.propose_entry(
+            term="Suresh",
+            gloss="An archmagos.",
+            evidence=[Evidence(1003, "He met Suresh at the library.")],
+            provenance=prov,
+        )
+        # Both terms appear in thread 101 batch 0 text; card budget fits one.
+        model = ScriptedModel([ChatResponse(content="gist b0")])
+        from terrarium_annotator.runner import Runner, RunnerConfig
+
+        runner = Runner(
+            corpus,
+            StoryLog(conn),
+            store,
+            model,
+            conn,
+            RunnerConfig(pass_id="t", context_tokens=30, card_budget_fraction=0.2),
+        )
+        runner.run(max_batches=1, only_threads=[101])
+        request = model.requests[0]["messages"][1]["content"]
+        cards = request.split("<known_glossary>")[1].split("</known_glossary>")[0]
+        assert "Vys" in cards and "Suresh" not in cards

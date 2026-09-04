@@ -542,6 +542,15 @@ class GlossaryStore:
             "FROM deferred_candidate ORDER BY id"
         ).fetchall()
 
+    def mention_counts(self) -> dict[int, int]:
+        """Entry id -> number of evidence citations (salience input)."""
+        return {
+            r[0]: r[1]
+            for r in self._conn.execute(
+                "SELECT entry_id, COUNT(*) FROM entry_source GROUP BY entry_id"
+            )
+        }
+
     # ------------------------------------------------------ internals
 
     def _insert_revision(
