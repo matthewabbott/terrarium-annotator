@@ -19,6 +19,7 @@ from terrarium_annotator.llm import ChatClient, OmpRpcClient, RecordingClient
 from terrarium_annotator.memory import StoryLog
 from terrarium_annotator.runner import Runner, RunnerConfig
 from terrarium_annotator.state import connect_annotator_db
+from terrarium_annotator.tools import ToolDispatcher
 from terrarium_annotator.verify import verify
 
 
@@ -52,6 +53,17 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--timeout", type=float, default=300.0)
     run.add_argument(
         "--record", default=None, help="Append raw request/response JSONL here (L4)"
+    )
+
+    chat = sub.add_parser(
+        "chat", help="Talk to the archivist about the glossary/story (read-only)"
+    )
+    chat.add_argument("--corpus-db", required=True)
+    chat.add_argument("--annotator-db", required=True)
+    chat.add_argument("--model", default="kimi-k2.5")
+    chat.add_argument("--timeout", type=float, default=300.0)
+    chat.add_argument(
+        "--once", default=None, help="Ask one question and exit (non-interactive)"
     )
 
     verify_parser = sub.add_parser(
@@ -103,6 +115,35 @@ def main(
         for v in violations:
             print(f"  [{v.check}] {v.detail}")
         return 1
+
+    if args.command == "chat":
+        from terrarium_annotator.chat import (
+            CHAT_SYSTEM_PROMPT,
+            READONLY_TOOLS,
+            chat_turn,
+            repl,
+        )
+
+        corpus = CorpusReader(args.corpus_db)
+        conn = connect_annotator_db(args.annotator_db)
+        dispatcher = ToolDispatcher(
+            GlossaryStore(conn, corpus.post_body),
+            corpus,
+            StoryLog(conn),
+            provenance=lambda: None,  # chat never writes; no provenance needed
+            allowed=READONLY_TOOLS,
+        )
+        factory = client_factory or (
+            lambda model: OmpRpcClient(model=model, timeout=args.timeout)
+        )
+        client = factory(args.model)
+        if args.once is not None:
+            messages = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}]
+            messages.append({"role": "user", "content": args.once})
+            print(chat_turn(messages, client, dispatcher))
+            return 0
+        repl(client, dispatcher)
+        return 0
 
     if args.command == "run":
         factory = client_factory or (

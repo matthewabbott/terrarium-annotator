@@ -137,6 +137,12 @@ TOOL_SCHEMAS = [
         {"pattern": {"type": "string"}},
         ["pattern"],
     ),
+    _schema(
+        "search_glossary",
+        "Full-text search over glossary terms and definitions.",
+        {"query": {"type": "string"}, "limit": {"type": "integer"}},
+        ["query"],
+    ),
 ]
 
 
@@ -149,18 +155,28 @@ class ToolDispatcher:
         corpus: CorpusReader,
         memory: StoryLog,
         provenance: Callable[[], Provenance],
+        allowed: set[str] | None = None,
     ) -> None:
         self._glossary = glossary
         self._corpus = corpus
         self._memory = memory
         self._provenance = provenance
+        # None = all tools (annotator). A set restricts both the advertised
+        # schemas and dispatch itself (chat surfaces are read-only).
+        self._allowed = allowed
 
     @property
     def schemas(self) -> list[dict]:
-        return TOOL_SCHEMAS
+        if self._allowed is None:
+            return TOOL_SCHEMAS
+        return [s for s in TOOL_SCHEMAS if s["function"]["name"] in self._allowed]
 
     def dispatch(self, call: ToolCall) -> str:
         """Execute one tool call; always returns a JSON string result."""
+        if self._allowed is not None and call.name not in self._allowed:
+            return json.dumps(
+                {"ok": False, "error": f"tool {call.name!r} not available here"}
+            )
         try:
             result = self._route(call)
             return json.dumps({"ok": True, "result": result})
@@ -225,6 +241,13 @@ class ToolDispatcher:
             }
         if call.name == "recall_story":
             return self._recall(a["pattern"])
+        if call.name == "search_glossary":
+            hits = self._glossary.search(a["query"], int(a.get("limit", 10)))
+            return {
+                "entries": [
+                    {"term": e.term, "gloss": e.gloss, "status": e.status} for e in hits
+                ]
+            }
         raise ValueError(f"unknown tool {call.name!r}")
 
     @staticmethod
