@@ -548,3 +548,40 @@ class TestRunnerSalience:
         request = model.requests[0]["messages"][1]["content"]
         cards = request.split("<known_glossary>")[1].split("</known_glossary>")[0]
         assert "Vys" in cards and "Suresh" not in cards
+
+
+class TestCheckpointSafety:
+    def test_failed_batch_never_checkpointed(self, env):
+        """An EmptyResponseError mid-run must not advance run_state or log a
+        gist for the failed batch — resume re-attempts it."""
+        from terrarium_annotator.llm.omp_rpc import EmptyResponseError
+
+        corpus_path, annotator_path = env
+        script = [
+            ChatResponse(
+                content=None,
+                tool_calls=(
+                    tc(
+                        "propose_entry",
+                        {
+                            "term": "Vys",
+                            "gloss": "Raw magical energy.",
+                            "evidence": [
+                                {
+                                    "post_id": 1001,
+                                    "quote": "channeled Vys into the cloak",
+                                }
+                            ],
+                            "tags": ["mechanic"],
+                        },
+                    ),
+                ),
+            ),
+            ChatResponse(content="Mik channels Vys into the cloak."),
+            EmptyResponseError("agent ended with no assistant text"),
+        ]
+        runner, conn = make_runner(corpus_path, annotator_path, ScriptedModel(script))
+        with pytest.raises(EmptyResponseError):
+            runner.run()
+        assert load_run_state(conn, "test-pass") == (101, 1)
+        assert runner.memory.log_len() == 1  # only batch 0's gist

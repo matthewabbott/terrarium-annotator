@@ -36,6 +36,12 @@ Arguments must be a JSON object. After tool results arrive, continue.
 Available tools:
 {schemas}"""
 
+
+class EmptyResponseError(ChatClientError):
+    """Terminal response carried no assistant text (reasoning-model slip).
+    Retried once per chat() call; raised persistently after that."""
+
+
 TOOL_CALL_RE = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.DOTALL)
 
 
@@ -148,7 +154,14 @@ class OmpRpcClient:
         tools: list[dict] | None = None,
         temperature: float = 0.4,
         max_tokens: int = 2048,
+        _attempts: int = 2,
     ) -> ChatResponse:
+        """One prompt against a fresh stateless RPC process. Empty terminal
+        responses (reasoning models occasionally end with no text) get ONE
+        retry with a fresh process; persistent empties raise
+        EmptyResponseError so the caller can halt without advancing state.
+        The retry budget is per call — no instance state.
+        """
         prompt = serialize_messages(messages, tools)
         proc = subprocess.Popen(
             self._command,
@@ -159,6 +172,10 @@ class OmpRpcClient:
         )
         try:
             return self._exchange(proc, prompt)
+        except EmptyResponseError:
+            if _attempts <= 1:
+                raise
+            return self.chat(messages, tools, temperature, max_tokens, _attempts - 1)
         finally:
             try:
                 proc.stdin.close()
@@ -224,7 +241,7 @@ class OmpRpcClient:
             elif ftype == "agent_end" and frame.get("isTerminal", True):
                 text = self._assistant_text(frame.get("messages", []))
                 if text is None:
-                    raise ChatClientError("agent ended with no assistant text")
+                    raise EmptyResponseError("agent ended with no assistant text")
                 return parse_response_text(text)
 
     @staticmethod

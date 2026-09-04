@@ -163,3 +163,33 @@ class TestSerialization:
         assert "batch text" in out
         assert "<previous_assistant>" in out and "<tool_call>" in out
         assert '<tool_result name="t">' in out and '{"ok": true}' in out
+
+
+class TestEmptyResponseRetry:
+    def test_retry_recovers_on_second_attempt(self, tmp_path):
+        script = tmp_path / "script.json"
+        script.write_text(json.dumps([{"text": ""}, {"text": "real answer"}]))
+        counter = tmp_path / "counter"
+        with pytest.MonkeyPatch.context() as m:
+            m.setenv("FAKE_OMP_SCRIPT", str(script))
+            m.setenv("FAKE_OMP_COUNTER", str(counter))
+            client = OmpRpcClient(
+                command=[sys.executable, FAKE, "--no-tools"], timeout=10.0
+            )
+            resp = client.chat([{"role": "user", "content": "hi"}])
+        assert resp.content == "real answer"
+        assert counter.read_text() == "2"  # exactly one retry
+
+    def test_persistent_empty_raises_after_two_attempts(self, tmp_path):
+        script = tmp_path / "script.json"
+        script.write_text(json.dumps([{"text": ""}]))
+        counter = tmp_path / "counter"
+        with pytest.MonkeyPatch.context() as m:
+            m.setenv("FAKE_OMP_SCRIPT", str(script))
+            m.setenv("FAKE_OMP_COUNTER", str(counter))
+            client = OmpRpcClient(
+                command=[sys.executable, FAKE, "--no-tools"], timeout=10.0
+            )
+            with pytest.raises(Exception, match="no assistant text"):
+                client.chat([{"role": "user", "content": "hi"}])
+        assert counter.read_text() == "2"  # bounded: initial + one retry

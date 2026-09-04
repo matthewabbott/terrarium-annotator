@@ -1,9 +1,12 @@
 """Fake `omp --mode rpc` server for OmpRpcClient tests (L2-style).
 
 Script via env: FAKE_OMP_SCRIPT = path to JSON list of {"text": ...} or
-{"error": ...} entries (one per prompt). FAKE_OMP_TOOLS = JSON list for the
+{"error": ...} entries, one per prompt. FAKE_OMP_TOOLS = JSON list for the
 get_state dumpTools field. FAKE_OMP_FAIL_SET_MODEL / FAKE_OMP_HANG trigger
-failure modes. Emits unsolicited noise frames like the real server.
+failure modes. FAKE_OMP_COUNTER = path to a counter file: because each
+OmpRpcClient chat() spawns a fresh process, the counter persists prompt
+position across processes (retries see the NEXT script entry).
+Emits unsolicited noise frames like the real server.
 """
 
 import json
@@ -54,7 +57,7 @@ def main():
     sys.stdout.flush()
     with open(os.environ["FAKE_OMP_SCRIPT"]) as f:
         script = json.loads(f.read())
-    calls = 0
+    counter_path = os.environ.get("FAKE_OMP_COUNTER")
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -75,8 +78,14 @@ def main():
             if os.environ.get("FAKE_OMP_HANG"):
                 time.sleep(60)
                 continue
+            calls = 0
+            if counter_path and os.path.exists(counter_path):
+                with open(counter_path) as cf:
+                    calls = int(cf.read().strip() or "0")
             entry = script[min(calls, len(script) - 1)]
-            calls += 1
+            if counter_path:
+                with open(counter_path, "w") as cf:
+                    cf.write(str(calls + 1))
             # Unsolicited frames, as the real server emits.
             sys.stdout.write(json.dumps({"type": "agent_start"}) + "\n")
             sys.stdout.write(
