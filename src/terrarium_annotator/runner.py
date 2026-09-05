@@ -103,11 +103,14 @@ class Runner:
         skipped. If the checkpoint's thread is gone, everything is done.
 
         With `only_threads`, the pass covers exactly those thread IDs in
-        chronological resolver order (input order is ignored) and the
-        checkpoint is disregarded — a filtered pass is always fresh.
+        chronological resolver order (input order is ignored). A checkpoint
+        belonging to THIS pass is honored (supervisor resumes), unless the
+        checkpoint's thread is outside the filter — then the filtered pass
+        starts fresh from the filter's first thread.
         """
         threads = self.corpus.thread_order()
         save_run_meta(self.conn, "config", json.dumps(asdict(self.config)))
+        resume = load_run_state(self.conn, self.config.pass_id)
         if only_threads is not None:
             known = {t.id for t in threads}
             unknown = [t for t in only_threads if t not in known]
@@ -115,15 +118,15 @@ class Runner:
                 raise ValueError(f"unknown thread ids: {unknown}")
             wanted = set(only_threads)
             threads = [t for t in threads if t.id in wanted]
-            resume_idx, resume_batch = 0, 0
-        else:
-            resume = load_run_state(self.conn, self.config.pass_id)
-            resume_idx, resume_batch = 0, 0
-            if resume is not None:
-                matches = [i for i, t in enumerate(threads) if t.id == resume[0]]
-                if not matches:
-                    return  # checkpoint past the final thread: nothing to do
-                resume_idx, resume_batch = matches[0], resume[1]
+            # A checkpoint outside the filter doesn't constrain this pass.
+            if resume is not None and resume[0] not in wanted:
+                resume = None
+        resume_idx, resume_batch = 0, 0
+        if resume is not None:
+            matches = [i for i, t in enumerate(threads) if t.id == resume[0]]
+            if not matches:
+                return  # checkpoint past the final thread: nothing to do
+            resume_idx, resume_batch = matches[0], resume[1]
 
         processed = 0
         for ti, thread in enumerate(threads):

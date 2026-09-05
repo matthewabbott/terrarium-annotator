@@ -422,21 +422,39 @@ class TestThreadFilter:
         assert gists[0].startswith("They travel")
         assert gists[1].startswith("Aghtaki")
 
-    def test_filtered_pass_ignores_checkpoint(self, env):
+    def test_filtered_pass_resumes_own_checkpoint(self, env):
+        """Same pass-id + filter containing the checkpoint thread: resume,
+        not restart (the supervisor's t1-40 recovery semantics)."""
         corpus_path, annotator_path = env
-        # Establish a checkpoint mid-thread-101 with a first pass.
         runner_a, conn = make_runner(
             corpus_path, annotator_path, ScriptedModel(list(SCRIPT[:2]))
         )
         runner_a.run(max_batches=1)
         assert load_run_state(conn, "test-pass") == (101, 1)
-        # A filtered pass on thread 101 starts at batch 0 regardless.
         runner_b, _ = make_runner(
-            corpus_path, annotator_path, ScriptedModel(list(SCRIPT[:2]))
+            corpus_path, annotator_path, ScriptedModel(list(SCRIPT[2:]))
         )
         runner_b.run(max_batches=1, only_threads=[101])
         gists = [e.gist for e in runner_b.memory.slice(0, 10)]
-        assert gists.count("Mik channels Vys into the cloak.") == 2
+        # Batch 0 was NOT reprocessed: its gist appears exactly once.
+        assert gists.count("Mik channels Vys into the cloak.") == 1
+
+    def test_filtered_pass_fresh_when_checkpoint_outside_filter(self, env):
+        """A checkpoint on a thread outside the filter does not constrain:
+        the filtered pass starts at the filter's first thread, batch 0."""
+        corpus_path, annotator_path = env
+        runner_a, conn = make_runner(
+            corpus_path, annotator_path, ScriptedModel(list(SCRIPT[:2]))
+        )
+        runner_a.run(max_batches=1)
+        assert load_run_state(conn, "test-pass") == (101, 1)
+        script = [ChatResponse(content="Aghtaki bandits appear; Mik pays them off.")]
+        runner_b, _ = make_runner(
+            corpus_path, annotator_path, ScriptedModel(script)
+        )
+        runner_b.run(max_batches=1, only_threads=[103])
+        gists = [e.gist for e in runner_b.memory.slice(0, 10)]
+        assert gists[-1].startswith("Aghtaki")  # fresh start at thread 103
 
 
 class TestDispatcherIntegrity:
