@@ -186,7 +186,6 @@ class ToolDispatcher:
             KeyError,
             TypeError,
             sqlite3.IntegrityError,
-            sqlite3.OperationalError,
         ) as exc:
             return json.dumps({"ok": False, "error": str(exc)})
 
@@ -229,6 +228,19 @@ class ToolDispatcher:
             if body is None:
                 raise ValueError(f"post {a['post_id']} not in corpus")
             return {"post_id": a["post_id"], "body": body}
+        if call.name == "search_glossary":
+            # Search is the one place model-supplied text meets the DB
+            # parser (FTS). A syntax-level OperationalError here becomes an
+            # error payload; corrupt/missing tables elsewhere still abort.
+            try:
+                hits = self._glossary.search(a["query"], int(a.get("limit", 10)))
+            except sqlite3.OperationalError as exc:
+                raise ValueError(f"search failed: {exc}") from exc
+            return {
+                "entries": [
+                    {"term": e.term, "gloss": e.gloss, "status": e.status} for e in hits
+                ]
+            }
         if call.name == "fetch_thread_range":
             posts = list(self._corpus.story_posts(int(a["thread_id"])))
             start = int(a.get("start", 0))
@@ -242,13 +254,6 @@ class ToolDispatcher:
             }
         if call.name == "recall_story":
             return self._recall(a["pattern"])
-        if call.name == "search_glossary":
-            hits = self._glossary.search(a["query"], int(a.get("limit", 10)))
-            return {
-                "entries": [
-                    {"term": e.term, "gloss": e.gloss, "status": e.status} for e in hits
-                ]
-            }
         raise ValueError(f"unknown tool {call.name!r}")
 
     @staticmethod

@@ -378,3 +378,18 @@ class TestSearchSanitization:
     def test_search_still_finds_terms(self, store):
         propose(store)
         assert [h.term for h in store.search("Vatis")] == ["Vatis"]
+
+
+class TestSearchEdgeCases:
+    def test_embedded_double_quote(self, store):
+        propose(store)
+        hits = store.search('he said "Vys" loudly')
+        assert isinstance(hits, list)
+
+    def test_empty_query(self, store):
+        propose(store)
+        assert store.search("") == []
+
+    def test_parentheses_and_special_chars(self, store):
+        propose(store)
+        assert store.search("(Vys) - [test] {braces} ^caret") == []
