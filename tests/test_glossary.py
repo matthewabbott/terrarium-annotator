@@ -355,3 +355,26 @@ class TestGateHeuristic:
         assert not is_generic_term("Rikāmā Rahivāsī")
         assert not is_generic_term("District 9")
         assert not is_generic_term("")
+
+
+class TestSearchSanitization:
+    def test_apostrophe_query_does_not_crash(self, store):
+        propose(store)
+        hits = store.search("Surya's")
+        assert isinstance(hits, list)  # no fts5 syntax error
+
+    def test_fts_operators_treated_as_phrase(self, store):
+        propose(store)
+        # Raw FTS5 would parse these; quoted, they are literal text.
+        assert store.search("Vatis OR Suresh") == []
+        assert store.search('Vatis AND "nope"') == []
+        assert store.search("NEAR(Vatis, Suresh)") == []
+
+    def test_phrase_search_finds_multiword(self, store):
+        propose(store, gloss="A mage of the Rhynian hierarchy.")
+        hits = store.search("Rhynian hierarchy")
+        assert [h.term for h in hits] == ["Vatis"]
+
+    def test_search_still_finds_terms(self, store):
+        propose(store)
+        assert [h.term for h in store.search("Vatis")] == ["Vatis"]

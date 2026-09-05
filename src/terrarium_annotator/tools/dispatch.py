@@ -186,6 +186,7 @@ class ToolDispatcher:
             KeyError,
             TypeError,
             sqlite3.IntegrityError,
+            sqlite3.OperationalError,
         ) as exc:
             return json.dumps({"ok": False, "error": str(exc)})
 

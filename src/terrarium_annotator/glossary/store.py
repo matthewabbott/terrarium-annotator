@@ -232,7 +232,9 @@ class GlossaryStore:
             "SELECT e.id, e.term, e.gloss, e.status, e.created_at, "
             "e.updated_at FROM entry e JOIN entry_fts f ON f.rowid = e.id "
             "WHERE entry_fts MATCH ? ORDER BY rank LIMIT ?",
-            (query, limit),
+            # Model-supplied text is a PHRASE, not FTS5 syntax: quote it
+            # (apostrophes, operators, parens must never reach MATCH raw).
+            ('"' + query.replace('"', '""') + '"', limit),
         )
         return [self._row_to_entry(r) for r in rows]
 
