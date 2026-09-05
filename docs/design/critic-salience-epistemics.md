@@ -63,6 +63,8 @@ Terms differ by frequency and importance: Vys (every thread), El-Amin/Elaudian (
 
 First-read vs reread asymmetry is the core insight: `strange language` is unlinkable on first read (the entry can never be found again), but on reread it's obviously a known entry. Rules:
 
+**The admission criterion** (Matt, 2026-09-05): an entry is warranted iff the referent is (a) **not resolvable** from an LLM's prior + local context ("condenser"-style magitech texture fails this — context explains it), AND (b) expected to recur or be load-bearing to understanding. The glossary is a databank that turns *broken references* into *sourced, understood references* — half "worth documenting in a wiki", half "resolvable referent". A term context-clue-obvious on first read earns an entry only when it shows up again (the graveyard/researcher path handles late recurrence).
+
 - **Specificity gate at propose time** (heuristic, researcher-audited): a term that is a bare common-noun descriptor with no proper/coined token and no existing alias goes to a **`deferred_candidate`** table (term + quote + post) instead of `entry`.
 - **Promotion**: if a deferred surface form recurs in a later batch (cheap trigger scan), it promotes to a real entry — the second sighting is evidence of referential stability.
 - **Reread linking**: a researcher pass over the corpus with the complete glossary turns known descriptors into *aliases* of canonical entries (entity-linking task), not new entries.
