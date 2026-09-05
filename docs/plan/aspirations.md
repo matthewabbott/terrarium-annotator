@@ -5,6 +5,8 @@
 ## Evaluating the t1–40 run (when it completes)
 
 - **Gold-coverage hard criterion** (Matt): the glossary should have an entry for *every* backlink in every published thread wiki page (218 unique entities across pages 3–40). Extra entries are fine — the bar is coverage, not exact match. Hardest class: books the protagonist reads — they look like texture but are inventory items with mechanical significance (reading grows the vys pool / teaches techniques). Consider a `book`/`document` tag prior boost during researcher passes.
+
+  Two counts, not one: (i) coverage of *all* published-page links, and (ii) coverage of links *knowable by that thread's cutoff* — published pages contain spoiler/meta links a first-read pass cannot know, so (ii) is the fair bar and (i) is the stretch bar. Normalize published slugs through our alias table before scoring (their `centurion-armor` = our "Rhynian Centurion Armor").
 - **Soft criterion**: how well generated entries/pages *match* the published wiki pages (fidelity of gloss vs published summary), beyond pure coverage.
 - A/B entry quality: same threads, old prompt vs revised prompt, Matt judges the diffs.
 
