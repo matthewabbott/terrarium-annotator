@@ -19,7 +19,7 @@ terrarium-annotator verify --corpus-db banished.db --annotator-db data/annotator
 terrarium-annotator chat --corpus-db banished.db --annotator-db data/annotator.db
 ```
 
-Smoke-proven: threads 1–2 and 3–5 read end-to-end with kimi-k2.5, 98 quote-grounded entries, `verify` clean on both DBs.
+Smoke-proven: threads 1–2 and 3–5 read end-to-end with kimi-k2.5 — 98 quote-grounded entries across the two runs (40 in the threads 1–2 DB, 58 in the threads 3–5 DB), `verify` clean on both.
 
 ## Current wiring
 
