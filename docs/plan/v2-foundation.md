@@ -92,7 +92,15 @@ Escalation is manual-by-design: the driver stops at any Gated item, any guardrai
 
 ## Gated on Matt (not autonomous)
 
-- **G1 — Model choice + credentials** for first real runs (Kimi API key or omp-RPC spike after validating the Python host-tool API against the omp repo source).
-- **G2 — L3 smoke run** on threads 30265887 + 30305969, then L4 recording capture.
-- **G3 — Push/PR policy** (origin exists; local-only so far).
-- **G4 — Lag/agreement on entries-per-1k-posts band** after the first real pass produces numbers.
+- ~~G1 — model/credentials~~ — resolved 2026-09-03/05: kimi-code via omp RPC (kimi-k2.5 entitled and in use).
+- ~~G2 — L3 smoke run~~ — done 2026-09-03 (threads 1–2 + 3–5, verify clean).
+- ~~G3 — push policy~~ — resolved 2026-09-05: both branches on origin, pushing as we go.
+- **G4 — entries-per-1k-posts band** — data exists now (90/1k on t1–40); agreement pending Matt's read of the coverage analysis.
+
+## Active goal (2026-09-05, goal-mode): researcher tier on t1–40
+
+Ordered phases (Matt's delegation, my chosen order — full run already launched first and progresses in background):
+1. ✅ Prompt revision (`01e19d0`) + full-quest run launch (`b168692`) — background, days.
+2. Build the researcher: corpus-wide targeted search (any thread, incl. beyond read position), alias propose/consolidate, retitle via rename_entry, merge proposals to a human queue (never auto-merge), quote-gated revisions; L0/L1 tests.
+3. Researcher pass on `data/annotator-t1-40.db` (whole-corpus search allowed per Matt).
+4. Before/after comparison report: exact-surface gold coverage (baseline 65/216), aliases added, retitles applied, merge-queue proposals listed for Matt.
