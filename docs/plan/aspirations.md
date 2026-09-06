@@ -13,7 +13,7 @@
 
 ## From Matt's t1–40 analysis review (2026-09-05)
 
-- **The gold set is fallible**: `game:siege` was a human mistake on the wiki (should be `culture:siege`-side). Treat the gold set as strong-but-imperfect; coverage scoring should tolerate a small error allowance, and wiki-side corrections are in scope when we generate pages.
+- **The gold set is evidence, not canon**: `game:siege` was a human mistake on the wiki. Rule: published backlinks are evaluation *evidence*, never ground truth. Known-bad links are kept in the set but labeled as gold errors and excluded from hard recall targets (we do not silently treat the wiki as authority; wiki-side corrections land when we generate pages).
 - **Best-fit naming is post-hoc by necessity**: characters introduced under aliases (Burnout → Skull Kid) or description-only names (papa-dracolich = "the dragon") can't be named right on first read. The researcher tier owns best-fit naming + alias consolidation after a pass.
 - **Ledger pages**: consolidate one-off-but-worth-recording details into pages like "Ledger of notable spirits" / "minor characters" / "minor locations" (Diovis, Hodei, Maximilien-class entries) — wiki structure decision, resolved at export time. Shahzada ≠ Shahzadi (prince vs princess titles — explicitly NOT a merge).
 - **Q&A content**: our mechanics entries from author Q&A posts are good adds; the *wiki's* deficiency (Q&A content never made it into magic/trivia sections). Thread/entity pages should have a Q&A section at export.
