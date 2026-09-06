@@ -97,10 +97,10 @@ Escalation is manual-by-design: the driver stops at any Gated item, any guardrai
 - ~~G3 — push policy~~ — resolved 2026-09-05: both branches on origin, pushing as we go.
 - **G4 — entries-per-1k-posts band** — data exists now (90/1k on t1–40); agreement pending Matt's read of the coverage analysis.
 
-## Active goal (2026-09-05, goal-mode): researcher tier on t1–40
 
+## Active goal (2026-09-05, goal-mode): researcher tier on t1–40 — COMPLETE
 Ordered phases (Matt's delegation, my chosen order — full run already launched first and progresses in background):
-1. ✅ Prompt revision (`01e19d0`) + full-quest run launch (`b168692`) — background, days.
-2. Build the researcher: corpus-wide targeted search (any thread, incl. beyond read position), alias propose/consolidate, retitle via rename_entry, merge proposals to a human queue (never auto-merge), quote-gated revisions; L0/L1 tests.
-3. Researcher pass on `data/annotator-t1-40.db` (whole-corpus search allowed per Matt).
-4. Before/after comparison report: exact-surface gold coverage (baseline 65/216), aliases added, retitles applied, merge-queue proposals listed for Matt.
+1. ✅ Prompt revision (`01e19d0`) + full-quest run launch (`b168692`) — background, days. **Ongoing** (`run-full` detached; `scripts/run-full.sh` bounded supervisor).
+2. ✅ Researcher built (`eefdb7f`): corpus-wide `search_corpus`, `rename_entry`, `propose_merge` (human queue), toolset boundaries (annotator excluded from researcher tools), provenance-from-evidence blame.
+3. ✅ Researcher pass on t1–40 (`0b22171` loop fixes; report `docs/worklog/2026-09-05-researcher-t1-40.md`): +24 aliases (mik/suresh holes closed), 12 revisions, 5 merge proposals queued for Matt.
+4. ✅ Comparison report: exact gold coverage 65→67/216 (mik + suresh landed); remaining misses need entry creation (next annotator pass or longer researcher session).
