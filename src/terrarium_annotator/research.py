@@ -30,6 +30,7 @@ Rules:
 - Every write requires verbatim evidence quotes from corpus posts. No quote, no write.
 - Mark epistemic mode on evidence: narrated / claimed / inferred.
 - Characters in this story are renamed and re-revealed; entries may legitimately share surnames or titles without being the same person.
+- NEVER announce intentions ("I'll start by...") — act with tool calls immediately. Your final report comes only after the work is done.
 - When done, write a one-paragraph report of what you changed and what you left for humans."""
 
 
@@ -87,11 +88,29 @@ class Researcher:
             },
         ]
         report = ""
+        work_done = False
+        nudges = 0
         for _ in range(self.max_rounds):
             response: ChatResponse = self.client.chat(
                 messages, tools=self.dispatcher.schemas
             )
             if not response.tool_calls:
+                # A content-only response before any work is an announcement,
+                # not a report — nudge (bounded) instead of accepting it.
+                if not work_done and nudges < 2:
+                    nudges += 1
+                    messages.append(
+                        {"role": "assistant", "content": response.content or ""}
+                    )
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": "You announced work but called no tools. "
+                            "Proceed with tool calls now, or reply DONE if the "
+                            "glossary needs nothing.",
+                        }
+                    )
+                    continue
                 report = response.content or ""
                 messages.append({"role": "assistant", "content": report})
                 break
@@ -102,6 +121,7 @@ class Researcher:
                     "tool_calls": [self._tc_json(c) for c in response.tool_calls],
                 }
             )
+            work_done = True
             for call in response.tool_calls:
                 result = self.dispatcher.dispatch(call)
                 messages.append(

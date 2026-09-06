@@ -229,3 +229,37 @@ class TestResearcherSession:
         assert row is not None and row[0] == 1
         rows = conn.execute("SELECT DISTINCT thread_id FROM entry_source").fetchall()
         assert all(r[0] != 0 for r in rows)
+
+    def test_announcement_gets_nudged_then_works(self, env):
+        """Regression for the live failure: content-only preamble must not
+        end the session; the nudge drives the model to tool calls."""
+        corpus, conn, store = env
+        script = [
+            ChatResponse(content="I'll start by probing the corpus."),  # no calls
+            ChatResponse(
+                content=None,
+                tool_calls=(
+                    ToolCall(
+                        name="add_alias",
+                        arguments={
+                            "term": "Archmagos Megalos",
+                            "alias": "Suresh",
+                            "evidence": {
+                                "post_id": 11,
+                                "quote": "Megalos Suresh welcomed him",
+                            },
+                        },
+                        id="c1",
+                    ),
+                ),
+            ),
+            ChatResponse(content="Aliased the Archmagos."),
+        ]
+        model = ScriptedModel(script)
+        r = Researcher(corpus, store, StoryLog(conn), model, conn)
+        report = r.research()
+        assert store.find("suresh").term == "Archmagos Megalos"
+        assert "Aliased" in report
+        # The nudge message went out between the announcement and the work.
+        user_msgs = [m["messages"][-1]["content"] for m in model.requests]
+        assert any("called no tools" in c for c in user_msgs)

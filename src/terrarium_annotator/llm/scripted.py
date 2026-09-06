@@ -7,6 +7,7 @@ request/response pairs as JSONL for L4 replay fixtures.
 
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 
@@ -35,13 +36,18 @@ class ScriptedModel:
         temperature: float = 0.4,
         max_tokens: int = 2048,
     ) -> ChatResponse:
+        # Deep-copy: callers mutate `messages` between calls (the runner's
+        # tool loop grows it in place); recording by reference would alias
+        # every request to the final list state.
         self.requests.append(
-            {
-                "messages": messages,
-                "tools": tools,
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-            }
+            copy.deepcopy(
+                {
+                    "messages": messages,
+                    "tools": tools,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                }
+            )
         )
         if not self._script:
             raise ChatClientError("script exhausted")

@@ -133,7 +133,13 @@ def test_research_subcommand(tmp_path, capsys):
     )
     conn.close()
 
-    model = ScriptedModel([ChatResponse(content="Nothing to change.")])
+    model = ScriptedModel(
+        [
+            ChatResponse(content="Nothing stands out."),
+            ChatResponse(content="Still nothing actionable."),
+            ChatResponse(content="Nothing to change."),
+        ]
+    )  # nudge cap is 2: announcement + 2 nudged replies
     code = main(
         [
             "research",
