@@ -66,6 +66,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--once", default=None, help="Ask one question and exit (non-interactive)"
     )
 
+    research = sub.add_parser(
+        "research", help="Top-down glossary work over the whole corpus"
+    )
+    research.add_argument("--corpus-db", required=True)
+    research.add_argument("--annotator-db", required=True)
+    research.add_argument("--model", default="kimi-k2.5")
+    research.add_argument("--timeout", type=float, default=300.0)
+    research.add_argument(
+        "--focus", default=None, help="Session focus, e.g. 'aliases and retitles'"
+    )
+    research.add_argument("--record", default=None)
+
     verify_parser = sub.add_parser(
         "verify", help="Check annotator DB invariants against the corpus"
     )
@@ -143,6 +155,31 @@ def main(
             print(chat_turn(messages, client, dispatcher))
             return 0
         repl(client, dispatcher)
+        return 0
+
+    if args.command == "research":
+        from terrarium_annotator.research import Researcher
+
+        corpus = CorpusReader(args.corpus_db)
+        conn = connect_annotator_db(args.annotator_db)
+        client: ChatClient = (
+            client_factory(args.model)
+            if client_factory
+            else (OmpRpcClient(model=args.model, timeout=args.timeout))
+        )
+        if args.record:
+            Path(args.record).parent.mkdir(parents=True, exist_ok=True)
+            client = RecordingClient(client, args.record)
+        researcher = Researcher(
+            corpus,
+            GlossaryStore(conn, corpus.post_body),
+            StoryLog(conn),
+            client,
+            conn,
+            pass_id="research",
+        )
+        report = researcher.research(focus=args.focus)
+        print(report)
         return 0
 
     if args.command == "run":

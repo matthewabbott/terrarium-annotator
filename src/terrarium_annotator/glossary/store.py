@@ -91,6 +91,17 @@ CREATE TABLE IF NOT EXISTS deferred_candidate(
 CREATE VIRTUAL TABLE IF NOT EXISTS entry_fts USING fts5(
     term, gloss, content=entry, content_rowid=id
 );
+CREATE TABLE IF NOT EXISTS merge_queue(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    term_a TEXT NOT NULL,
+    term_b TEXT NOT NULL,
+    rationale TEXT NOT NULL,
+    quote TEXT NOT NULL,
+    post_id INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'accepted', 'rejected')),
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -378,7 +389,12 @@ class GlossaryStore:
         return self.revisions(entry.id)[-1]
 
     def add_alias(
-        self, term_or_id: str | int, alias: str, *, evidence: Evidence
+        self,
+        term_or_id: str | int,
+        alias: str,
+        *,
+        evidence: Evidence,
+        thread_id: int | None = None,
     ) -> None:
         """Register a surface form. Same gate as definition writes: a
         verbatim quote containing the alias, recorded to entry_source
@@ -407,8 +423,15 @@ class GlossaryStore:
         )
         self._conn.execute(
             "INSERT INTO entry_source(entry_id, revision_id, thread_id,"
-            " post_id, quote, mode, created_at) VALUES (?, NULL, NULL, ?, ?, ?, ?)",
-            (entry.id, evidence.post_id, evidence.quote, evidence.mode, _now()),
+            " post_id, quote, mode, created_at) VALUES (?, NULL, ?, ?, ?, ?, ?)",
+            (
+                entry.id,
+                thread_id,
+                evidence.post_id,
+                evidence.quote,
+                evidence.mode,
+                _now(),
+            ),
         )
         self._conn.commit()
 
@@ -537,12 +560,66 @@ class GlossaryStore:
         self._conn.commit()
         return self.get(keep.id)
 
+    def propose_merge(
+        self,
+        term_a: str,
+        term_b: str,
+        rationale: str,
+        evidence: Evidence,
+    ) -> int:
+        """Queue a merge proposal for human review. NEVER merges directly.
+        Quote-gated like all writes: evidence must cite a real post and
+        mention at least one of the two terms."""
+        a = self.get(term_a)  # raises UnknownEntry if absent
+        b = self.get(term_b)
+        if a.id == b.id:
+            raise GlossaryError("cannot merge an entry into itself")
+        if not rationale.strip():
+            raise GlossaryError("merge proposals require a rationale")
+        body = self._post_body(evidence.post_id)
+        if body is None:
+            raise QuoteRejected(f"post {evidence.post_id} not in corpus")
+        if evidence.quote not in body:
+            raise QuoteRejected(f"quote is not verbatim in post {evidence.post_id}")
+        if a.term not in evidence.quote and b.term not in evidence.quote:
+            raise QuoteRejected("quote mentions neither term")
+        cur = self._conn.execute(
+            "INSERT INTO merge_queue(term_a, term_b, rationale, quote,"
+            " post_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                a.term,
+                b.term,
+                rationale.strip(),
+                evidence.quote,
+                evidence.post_id,
+                _now(),
+            ),
+        )
+        self._conn.commit()
+        return cur.lastrowid
+
+    def merge_queue_pending(self) -> list[tuple]:
+        """Pending merge proposals (id, term_a, term_b, rationale)."""
+        return self._conn.execute(
+            "SELECT id, term_a, term_b, rationale FROM merge_queue "
+            "WHERE status = 'pending' ORDER BY id"
+        ).fetchall()
+
     def deferred_candidates(self) -> list[tuple]:
         """Shadow-gate log rows (id, term, quote, post_id, thread_id)."""
         return self._conn.execute(
             "SELECT id, term, quote, post_id, thread_id, created_at "
             "FROM deferred_candidate ORDER BY id"
         ).fetchall()
+
+    def latest_source_post(self, entry_id: int) -> int | None:
+        """Most recent cited post for an entry (rename blame anchor)."""
+        row = self._conn.execute(
+            "SELECT post_id FROM entry_source WHERE entry_id = ? "
+            "ORDER BY id DESC LIMIT 1",
+            (entry_id,),
+        ).fetchone()
+        return row[0] if row else None
 
     def mention_counts(self) -> dict[int, int]:
         """Entry id -> number of evidence citations (salience input)."""

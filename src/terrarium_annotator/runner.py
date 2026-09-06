@@ -27,7 +27,7 @@ from terrarium_annotator.state import (
     save_run_meta,
     save_run_state,
 )
-from terrarium_annotator.tools import ToolDispatcher
+from terrarium_annotator.tools import ANNOTATOR_TOOLS, ToolDispatcher
 
 SYSTEM_PROMPT = """You are the terrarium annotator: you read a fantasy quest story sequentially and maintain a glossary of setting-specific terms, characters, places, and mechanics.
 
@@ -86,7 +86,11 @@ class Runner:
         self.config = config or RunnerConfig()
         self._provenance: Provenance | None = None
         self.dispatcher = ToolDispatcher(
-            glossary, corpus, memory, provenance=lambda: self._provenance_or_raise()
+            glossary,
+            corpus,
+            memory,
+            provenance=lambda: self._provenance_or_raise(),
+            allowed=ANNOTATOR_TOOLS,
         )
 
     def _provenance_or_raise(self) -> Provenance:

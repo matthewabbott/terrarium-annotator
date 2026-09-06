@@ -143,7 +143,61 @@ TOOL_SCHEMAS = [
         {"query": {"type": "string"}, "limit": {"type": "integer"}},
         ["query"],
     ),
+    _schema(
+        "search_corpus",
+        "Substring-search every post body in the corpus (any thread, "
+        "including unread ones). Researcher tool for finding evidence.",
+        {"needle": {"type": "string"}, "limit": {"type": "integer"}},
+        ["needle"],
+    ),
+    _schema(
+        "rename_entry",
+        "Retitle an entry to its best-fit wiki name; the old title becomes "
+        "an alias. For consolidating to canonical naming.",
+        {"term": {"type": "string"}, "new_term": {"type": "string"}},
+        ["term", "new_term"],
+    ),
+    _schema(
+        "propose_merge",
+        "Propose merging two entries that share a referent. Queued for "
+        "human review; NEVER merges directly. Requires a rationale and a "
+        "verbatim quote mentioning one of the terms.",
+        {
+            "term_a": {"type": "string"},
+            "term_b": {"type": "string"},
+            "rationale": {"type": "string"},
+            "evidence": {
+                "type": "object",
+                "properties": {
+                    "post_id": {"type": "integer"},
+                    "quote": {"type": "string"},
+                },
+                "required": ["post_id", "quote"],
+                "additionalProperties": False,
+            },
+        },
+        ["term_a", "term_b", "rationale", "evidence"],
+    ),
 ]
+
+# The annotator (serial reader) gets exactly these — no corpus lookahead,
+# no retitle, no merge queue. The researcher gets ANNOTATOR_TOOLS plus its
+# own. Chat surfaces use chat.READONLY_TOOLS.
+ANNOTATOR_TOOLS = {
+    "propose_entry",
+    "update_entry",
+    "add_alias",
+    "fetch_entry",
+    "fetch_post",
+    "fetch_thread_range",
+    "recall_story",
+    "search_glossary",
+}
+RESEARCHER_TOOLS = ANNOTATOR_TOOLS | {
+    "search_corpus",
+    "rename_entry",
+    "propose_merge",
+}
 
 
 class ToolDispatcher:
@@ -189,6 +243,25 @@ class ToolDispatcher:
         ) as exc:
             return json.dumps({"ok": False, "error": str(exc)})
 
+    def _provenance_for(self, post_ids: list[int]) -> Provenance:
+        """Blame follows the evidence: thread_id comes from the first cited
+        post (so researcher writes are never attributed to a synthetic
+        thread 0); batch/pass fields come from the ambient provenance."""
+        base = self._provenance()
+        thread_id = base.thread_id
+        if post_ids:
+            looked_up = self._corpus.post_thread(post_ids[0])
+            if looked_up is not None:
+                thread_id = looked_up
+        return Provenance(
+            thread_id=thread_id,
+            pass_id=base.pass_id,
+            batch_lo=base.batch_lo,
+            batch_hi=base.batch_hi,
+            log_seq=base.log_seq,
+            tree_version=base.tree_version,
+        )
+
     def _route(self, call: ToolCall) -> object:
         a = call.arguments
         if call.name == "propose_entry":
@@ -196,7 +269,9 @@ class ToolDispatcher:
                 term=a["term"],
                 gloss=a["gloss"],
                 evidence=self._evidence_list(a["evidence"]),
-                provenance=self._provenance(),
+                provenance=self._provenance_for(
+                    [e.post_id for e in self._evidence_list(a["evidence"])]
+                ),
                 tags=tuple(a.get("tags", ())),
                 keys=tuple(a.get("keys", ())),
             )
@@ -206,19 +281,25 @@ class ToolDispatcher:
                 a["term"],
                 gloss=a["gloss"],
                 evidence=self._evidence_list(a["evidence"]),
-                provenance=self._provenance(),
+                provenance=self._provenance_for(
+                    [e.post_id for e in self._evidence_list(a["evidence"])]
+                ),
             )
             return {"revision_id": revision.id}
         if call.name == "add_alias":
             ev = a["evidence"]
+            post_id = int(ev["post_id"])
             self._glossary.add_alias(
                 a["term"],
                 a["alias"],
                 evidence=Evidence(
-                    post_id=int(ev["post_id"]),
+                    post_id=post_id,
                     quote=ev["quote"],
                     mode=ev.get("mode", "narrated"),
                 ),
+                # Blame follows the cited post directly (None if unknown —
+                # the store's quote gate rejects unknown posts anyway).
+                thread_id=self._corpus.post_thread(post_id),
             )
             return {"alias": a["alias"]}
         if call.name == "fetch_entry":
@@ -254,6 +335,40 @@ class ToolDispatcher:
             }
         if call.name == "recall_story":
             return self._recall(a["pattern"])
+        if call.name == "search_corpus":
+            posts = self._corpus.search_posts(a["needle"], int(a.get("limit", 20)))
+            return {
+                "posts": [
+                    {
+                        "id": p.id,
+                        "thread_id": p.thread_id,
+                        "time": p.time,
+                        "body": p.body[:600],
+                    }
+                    for p in posts
+                ],
+                "total": len(posts),
+            }
+        if call.name == "rename_entry":
+            target = self._glossary.get(a["term"])
+            anchor = self._glossary.latest_source_post(target.id)
+            entry = self._glossary.rename_entry(
+                a["term"],
+                a["new_term"],
+                # Retitles carry no new evidence; blame anchors to the
+                # entry's most recent cited post (never a synthetic thread).
+                provenance=self._provenance_for([anchor] if anchor else []),
+            )
+            return {"term": entry.term, "aliases": list(entry.aliases)}
+        if call.name == "propose_merge":
+            ev = a["evidence"]
+            qid = self._glossary.propose_merge(
+                a["term_a"],
+                a["term_b"],
+                a["rationale"],
+                Evidence(post_id=int(ev["post_id"]), quote=ev["quote"]),
+            )
+            return {"merge_queue_id": qid, "status": "pending"}
         raise ValueError(f"unknown tool {call.name!r}")
 
     @staticmethod

@@ -69,10 +69,42 @@ class CorpusReader:
                 body=r[5] or "",
             )
 
+    def search_posts(self, needle: str, limit: int = 20) -> list[Post]:
+        """Corpus-wide substring search over post bodies (researcher tool).
+
+        Searches ALL posts (not just story posts), any thread, including
+        beyond the annotator's read position — the researcher works
+        corpus-wide by design. Case-insensitive LIKE; a 35MB full scan is
+        subsecond at this corpus size.
+        """
+        rows = self._conn.execute(
+            "SELECT id, thread_id, time, name, subject, body FROM post "
+            "WHERE body LIKE ? ORDER BY time ASC LIMIT ?",
+            (f"%{needle}%", limit),
+        )
+        return [
+            Post(
+                id=r[0],
+                thread_id=r[1],
+                time=r[2],
+                name=r[3] or "",
+                subject=r[4] or "",
+                body=r[5] or "",
+            )
+            for r in rows
+        ]
+
     def post_body(self, post_id: int) -> str | None:
         """Body of a single post by id, or None if absent. Quote checks."""
         row = self._conn.execute(
             "SELECT body FROM post WHERE id = ?", (post_id,)
+        ).fetchone()
+        return row[0] if row else None
+
+    def post_thread(self, post_id: int) -> int | None:
+        """Thread id for a post — provenance derives blame from evidence."""
+        row = self._conn.execute(
+            "SELECT thread_id FROM post WHERE id = ?", (post_id,)
         ).fetchone()
         return row[0] if row else None
 
