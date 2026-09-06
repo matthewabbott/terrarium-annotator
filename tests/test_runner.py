@@ -449,9 +449,7 @@ class TestThreadFilter:
         runner_a.run(max_batches=1)
         assert load_run_state(conn, "test-pass") == (101, 1)
         script = [ChatResponse(content="Aghtaki bandits appear; Mik pays them off.")]
-        runner_b, _ = make_runner(
-            corpus_path, annotator_path, ScriptedModel(script)
-        )
+        runner_b, _ = make_runner(corpus_path, annotator_path, ScriptedModel(script))
         runner_b.run(max_batches=1, only_threads=[103])
         gists = [e.gist for e in runner_b.memory.slice(0, 10)]
         assert gists[-1].startswith("Aghtaki")  # fresh start at thread 103
