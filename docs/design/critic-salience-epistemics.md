@@ -59,6 +59,10 @@ Terms differ by frequency and importance: Vys (every thread), El-Amin/Elaudian (
 - **Reclamation pass**: a periodic researcher sweep of the graveyard — promote dormants that acquired a second mention, collate low-signal entries that turn out to share a referent (cluster-linking pattern) and fold them into canonical entries via the merge queue, or propose culls for the truly inconsequential. Cull proposals are quote-audited and **demote-first** (graveyard, reversible); deletion stays human-only. The graveyard is the researcher's inbox.
 - **Search/RAG**: FTS rank × salience; later, if embeddings arrive for the audit side, salience weights those too.
 
+## 3a. Identity over time (Matt, 2026-09-05)
+
+Same words change referents and same referents change names, both mid-story. Live instances from the t1–40 DB: **Husk** (a temple-guardian creature in early threads; a soul-layer in late metaphysics — needs the disambiguation-suffix split, `Husk (creature)` / `Husk (soul layer)`); **Emperor's Hand signet** ≠ ring-of-sanity *yet* (enchanted later — identity is temporal, not eternal); **projection sword** → shockwave sword (rename later); **Burnout** → Skull Kid (character introduced under an alias). Rules: (1) never auto-merge; (2) entries get split via disambiguation suffixes when a homograph collision is confirmed; (3) rename/alias evolution is expected and cheap (`rename_entry` exists); (4) the researcher's dedupe pass must be temporal-aware: "same in thread 12" ≠ "same in thread 200".
+
 ## 4. Deferral (admission policy)
 
 First-read vs reread asymmetry is the core insight: `strange language` is unlinkable on first read (the entry can never be found again), but on reread it's obviously a known entry. Rules:

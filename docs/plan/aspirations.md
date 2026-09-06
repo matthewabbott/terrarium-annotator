@@ -10,6 +10,16 @@
 - **Soft criterion**: how well generated entries/pages *match* the published wiki pages (fidelity of gloss vs published summary), beyond pure coverage.
 - A/B entry quality: same threads, old prompt vs revised prompt, Matt judges the diffs.
 
+
+## From Matt's t1–40 analysis review (2026-09-05)
+
+- **The gold set is fallible**: `game:siege` was a human mistake on the wiki (should be `culture:siege`-side). Treat the gold set as strong-but-imperfect; coverage scoring should tolerate a small error allowance, and wiki-side corrections are in scope when we generate pages.
+- **Best-fit naming is post-hoc by necessity**: characters introduced under aliases (Burnout → Skull Kid) or description-only names (papa-dracolich = "the dragon") can't be named right on first read. The researcher tier owns best-fit naming + alias consolidation after a pass.
+- **Ledger pages**: consolidate one-off-but-worth-recording details into pages like "Ledger of notable spirits" / "minor characters" / "minor locations" (Diovis, Hodei, Maximilien-class entries) — wiki structure decision, resolved at export time. Shahzada ≠ Shahzadi (prince vs princess titles — explicitly NOT a merge).
+- **Q&A content**: our mechanics entries from author Q&A posts are good adds; the *wiki's* deficiency (Q&A content never made it into magic/trivia sections). Thread/entity pages should have a Q&A section at export.
+- **Unreliable narration**: Mikhael is prejudiced; mechanics knowledge is classical-physics-then-relativity. Entries should document conflicting accounts with in-story provenance of each (epistemic modes + per-source attribution, §2) rather than flattening to one story.
+- **Specialist annotators**: mechanics-specialist pass (attributes/skills like silver-tongued, inventory, companions, abilities, books), magic-taxonomy pass, objects pass — narrow-focus glossary-enhanced readthroughs after the main pass.
+
 ## Prompt/skillset revision for the NEXT pass (not mid-run)
 
 - Annotator prompt gains the revised admission criterion (OR-form: unresolvable/confusing OR wiki-worthy OR colloquial-with-divergent-in-setting-meaning, the `husk` class). See design §4.
