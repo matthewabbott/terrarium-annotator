@@ -2,6 +2,20 @@
 
 *The place for "note it down, don't build it yet." Ordered roughly near → far. See `docs/plan/v2-foundation.md` for the active build plan and `docs/design/critic-salience-epistemics.md` for the quality architecture these feed.*
 
+## Token-usage observability (Matt, 2026-09-12)
+
+The ladder gets a cost column from day one: not just "which prompt/model is best" but "which way of working costs what". Components:
+
+- **Usage capture**: record provider `usage` (prompt/completion/cached tokens when reported) per call in transcript/run_meta; attribute per call-type (annotation vs merge-settle vs chat vs researcher) and per context component (cards vs digest vs scene vs system). Response `usage` fields are ground truth where provided; chars/4 heuristic otherwise. RPC `agent_end` may carry telemetry (check rpc.md fields).
+- **Headline metric**: cost per covered gold entity per variant (quality and cost in one number). Secondary: entries/1k posts × cost; tool calls per batch; context growth slope over a run.
+- **Efficiency variants to A/B** (first-class ladder candidates):
+  1. **Prefix caching**: reuse ONE RPC process across a batch's tool rounds (provider-side prefix cache hits on unchanged system+cards); keep stateless across batches. Likely the biggest single win — cost structure today is turns × cold context.
+  2. **Batch writes**: a `propose_entries` array tool (one call → N gated entries) to collapse N turns into 1.
+  3. **Whole-thread reading** (already on this list): amortizes system+cards per thread instead of per 5 posts.
+  4. **Bulk model for reading** (Deepseek Flash), strong model for critic/researcher.
+  5. **Context trims**: gloss length caps, top-k cards by salience, digest budget tuning, stop-early on repeated gate rejections.
+  6. Web research on RAG/prompt-caching efficiency strategies, then ladder-test the promising ones.
+
 ## Evaluating the t1–40 run (when it completes)
 
 - **Gold-coverage hard criterion** (Matt): the glossary should have an entry for *every* backlink in every published thread wiki page (218 unique entities across pages 3–40). Extra entries are fine — the bar is coverage, not exact match. Hardest class: books the protagonist reads — they look like texture but are inventory items with mechanical significance (reading grows the vys pool / teaches techniques). Consider a `book`/`document` tag prior boost during researcher passes.
