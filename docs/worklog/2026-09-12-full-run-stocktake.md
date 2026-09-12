@@ -34,7 +34,7 @@ Not a disaster, and NOT a reason to revert: the prompt fixed its target classes.
 **So: permissiveness vs the baseline is a hypothesis to adjudicate, not a verdict.** The correct workload is adjudication of the flagged candidates (researcher review pass, quote-audited), not bulk cull-demotion. Do NOT prune all 239 on the flag alone.
 
 ## Recommended next steps (Matt's call)
-1. **Adjudication pass** on the 239 flagged candidates (researcher, cull-demote only clear texture to graveyard; keep/upgrade the valids) — plus a scan of the unflagged 216 for stragglers (`PROLUO`-class).
+1. **Bounded, instrumented adjudication pass** — NOT a bulk cleanup, and NOT yet an economics verdict. Sequence: (a) add usage capture first (record provider `usage` fields per call — the observability aspiration's minimal slice); (b) the researcher quote-audits a stratified subset (~40–60 of the 239 flagged candidates) against source evidence, demoting only clear texture — this is quality adjudication first: shadow-flag precision per class, and the critic's first real workload; (c) the captured usage yields a *bounded baseline* cost measurement for adjudication. Whether post-hoc pruning is economically superior, and whether token economics is the binding constraint at all, are open questions for that data — not premises.
 2. **Restart the run only on Matt's explicit go-ahead** (the Sep 11 quota reset has passed, but Matt paused the run Sep 7 — no restart without authorization). When restarted: style tweak (discourage bookkeeping caps and pure-scenery entries), resume from checkpoint 31411898:4.
 3. Post-run: researcher alias pass (same as t1–40) then coverage analysis.
 
