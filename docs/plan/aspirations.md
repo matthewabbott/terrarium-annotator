@@ -17,7 +17,40 @@ The ladder gets a cost column from day one: not just "which prompt/model is best
   6. Web research on RAG/prompt-caching efficiency strategies, then ladder-test the promising ones.
 
 
-## NEXT: usage telemetry (gated task for next session)
+
+## Token-efficiency laddering (Matt, 2026-09-13; AFTER prompt laddering + model onboarding)
+
+A/B the efficiency variants above (prefix caching, batch writes, whole-thread
+reading, bulk model, context trims, RAG strategies) as measured ladder runs —
+but NOT on threads 1–5. Cost structure is turns × cold context × GROWING
+cards, and a 1–5 slice has a near-empty glossary: efficiency behavior there
+misleads. Instead:
+
+- **Slice**: threads 35–40, run with the agent state as of the thread-34
+  close (~150+ entries of card pressure, 34-thread-deep digest, real merge
+  tree) — tests efficiency against the rolling-context regime we actually
+  operate in.
+- **Prerequisite build**: a snapshot-at-cutoff tool that materializes a
+  variant DB folded from revisions/story_log up to the thread-34 boundary
+  (architecture §4 rehydration defines the fold; nobody has built the
+  materialization command). Do NOT copy annotator-t1-40.db raw — it contains
+  entries created while reading threads 35–40, which would leak the future
+  into the variants' contexts.
+- **Scorecard**: same as prompt/model ladders plus the cost column from
+  telemetry (cost per covered gold entity is computable on 35–40 — the gold
+  set spans pages 3–40). Quality floor: a variant that wins on cost but
+  drops gold coverage is not a win.
+
+## ~~NEXT: usage telemetry~~ — DONE 2026-09-13 (was: gated task)
+
+Shipped on `feature/v2-foundation`: `InstrumentedClient` (llm/telemetry.py),
+attempt-observer seam on both retrying clients, per-run JSONL under
+`data/recordings/usage/`, `usage-summary` CLI. omp RPC usage field names
+remain UNKNOWN (protocol docs don't enumerate them; agent_end extras are
+captured verbatim into `ChatResponse.raw` so they land if ever emitted).
+Evidence: docs/worklog/2026-09-13-telemetry.md.
+
+## NEXT (historical, kept for context): usage telemetry (gated task for next session)
 
 **Priority #1 for the next session. Acceptance gate — either met, or the session stops and reports the blocker.**
 
