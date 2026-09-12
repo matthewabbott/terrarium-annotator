@@ -41,3 +41,7 @@ Not a disaster, and NOT a reason to revert: the prompt fixed its target classes.
 ## 2026-09-12 — discussion: prompt laddering + model onboarding
 
 Matt floated (pre-handover): A/B prompt variants on a 5-thread slice with criteria scoring; onboarding Deepseek v4.1 Flash via the same scorecard; model provenance in blame + rehydrate-with-generating-model; usage circuit-breaking (80% weekly or $x); prompts separated by agent and by metrics. Design note: docs/design/prompt-laddering.md. Key planning fact: full-quest run covered 25/278 threads on ONE weekly Kimi quota (~10–11 windows at current pace).
+
+## Cost autopsy (2026-09-12): why the revised prompt cost ~10x
+
+Per-batch, t1-40 vs full-run: tool calls 2.7 → 8.5; prompt chars 34.5k → 99.5k; output chars 1.1k → 2.3k; entries 0.43 → 1.64. Total prompt volume 14.4M vs 27.6M chars for 2/3 the batches. Mechanisms: (1) liberal admission → more proposals per batch → more tool calls → more follow-up turns, each re-sending the full cold context (per-call fresh RPC process = no prefix cache); (2) growing glossary → bigger injected card blocks every subsequent batch; (3) full-restate rule → longer outputs and bigger cards downstream. Not one cause: turns × context growth × output growth, multiplied. Fixes to test in the ladder: per-batch proposal cap, dedupe-before-propose, shorter glosses, tool-round budget.
