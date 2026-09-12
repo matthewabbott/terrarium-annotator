@@ -93,6 +93,11 @@ clients need an attempt observer.
   in `OpenAICompatibleClient`, a 200 whose body fails `parse_choice`
   (malformed envelope/tool call) records an ERROR attempt, not a false
   success; regression test `test_openai_malformed_200_is_error_not_success`.
+- **Launch failures are attempts too** (advisory fix): `subprocess.Popen`
+  in `OmpRpcClient.chat` ran outside observation, so a missing-binary
+  `OSError` escaped unrecorded. Now observed (error_type e.g.
+  `FileNotFoundError`) with the re-raise preserved — still not retried,
+  matching prior behavior. Test: `test_omp_rpc_launch_failure_records_attempt`.
 - **Durable output**: `data/recordings/usage/<run_id>.jsonl` (gitignored
   data/), `run_id = <pass_id>-<UTC start>`; filename sanitized, record
   field verbatim. Always-on for the `run`, `research`, and `chat` CLI
@@ -130,7 +135,7 @@ clients need an attempt observer.
 
 ## Evidence (merge bar)
 
-- `.venv/bin/python -m pytest tests -q` → **187 passed** (was 175; +12 new)
+- `.venv/bin/python -m pytest tests -q` → **188 passed** (was 175; +13 new)
   in 85s, after `ruff format` (semantics-preserving reformat only).
 - `.venv/bin/ruff check src tests` → All checks passed.
 - `.venv/bin/ruff format --check src tests` → 41 files already formatted.

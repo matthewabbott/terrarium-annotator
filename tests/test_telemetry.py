@@ -249,6 +249,23 @@ class TestInternalRetrySeam:
         assert [(a["attempt"], a["status"]) for a in rec["attempts"]] == [(1, "error")]
         assert rec["attempts"][0]["error_type"] == "ChatClientError"
 
+    def test_omp_rpc_launch_failure_records_attempt(self, tmp_path):
+        # Popen OSError (missing binary): not retried today, re-raised —
+        # and now recorded as an attempt rather than escaping invisibly.
+        inner = OmpRpcClient(
+            command=["/nonexistent/omp-binary", "--no-tools"], attempts=2
+        )
+        client, log = make_wrapped(tmp_path, inner)
+        with pytest.raises(OSError):
+            client.chat([{"role": "user", "content": "hi"}])
+
+        (rec,) = read_records(log)
+        assert rec["status"] == "error"
+        assert rec["error_type"] == "FileNotFoundError"
+        assert [
+            (a["attempt"], a["status"], a["error_type"]) for a in rec["attempts"]
+        ] == [(1, "error", "FileNotFoundError")]
+
 
 class TestSummarize:
     def test_per_run_and_call_type_aggregates(self, tmp_path):

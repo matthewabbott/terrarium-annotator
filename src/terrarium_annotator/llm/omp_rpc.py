@@ -177,14 +177,20 @@ class OmpRpcClient:
         prompt = serialize_messages(messages, tools)
         last_error: ChatClientError | None = None
         for attempt in range(1, self.attempts + 1):
-            proc = subprocess.Popen(
-                self._command,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                text=True,
-            )
             t0 = time.monotonic()
+            try:
+                proc = subprocess.Popen(
+                    self._command,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                )
+            except OSError as exc:
+                # Launch failure (e.g. missing omp binary): not retried
+                # today — preserve the re-raise, but record the attempt.
+                self._observe(attempt, "error", type(exc).__name__, t0)
+                raise
             try:
                 response = self._exchange(proc, prompt)
             except (EmptyResponseError, RPCTimeoutError) as exc:
