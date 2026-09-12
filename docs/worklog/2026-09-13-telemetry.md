@@ -154,6 +154,19 @@ clients need an attempt observer.
   per-call-type buckets printed for annotation (13 calls), chat (3),
   merge-settle (4, 1 error), researcher (9) with chars, tool calls,
   attempts-by-status, est tokens.
+- Self-contained per-file summary (`usage-summary
+  data/recordings/usage/telemetry-sample-20260912T102117.jsonl`):
+  ```
+  per run:
+    telemetry-sample-20260912T102117: calls=3 errors=1 chars_in=12143
+      chars_out=45 tool_calls=1 attempts[error=1, success=2]
+      est_tokens_in=3035 est_tokens_out=10 provider_usage=0
+      error_types: ChatClientError×1
+  per call type:
+    annotation: calls=1 ... chars_in=12127 chars_out=38 tool_calls=1
+    merge-settle: calls=2 errors=1 chars_in=16 chars_out=7
+      attempts[error=1, success=1]  error_types: ChatClientError×1
+  ```
 
 ## Open questions / next steps
 
