@@ -26,6 +26,8 @@ The ladder gets a cost column from day one: not just "which prompt/model is best
 - L0 tests: wrapper over ScriptedModel asserts record contents and null-provider behavior; merge bar (`pytest`, `ruff`) green.
 - A `summarize()` (or CLI) producing per-run and per-call-type aggregates (calls, chars in/out, tool calls).
 - Zero behavior change: pure wrapper; annotator and researcher constructible with or without it.
+- **Failed/retry calls are first-class records**: every attempt (success or exception) logged with attempt number, status, and error type — the retry tax is a major cost component, not an afterthought.
+- **Stable identifiers**: each record carries a run ID and call-type label (annotation / merge-settle / chat / researcher) so per-call-type aggregation is actually possible. Context-component sizes are passed by the prompt assembler or marked `unknown` — no silent gaps.
 
 ## Evaluating the t1–40 run (when it completes)
 
