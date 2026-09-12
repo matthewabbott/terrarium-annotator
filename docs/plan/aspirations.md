@@ -16,6 +16,17 @@ The ladder gets a cost column from day one: not just "which prompt/model is best
   5. **Context trims**: gloss length caps, top-k cards by salience, digest budget tuning, stop-early on repeated gate rejections.
   6. Web research on RAG/prompt-caching efficiency strategies, then ladder-test the promising ones.
 
+
+## NEXT: usage telemetry (gated task for next session)
+
+**Priority #1 for the next session. Acceptance gate — either met, or the session stops and reports the blocker.**
+
+- Provider-neutral `InstrumentedClient` wrapper recording per call: prompt/completion char counts, tool-call count, context-component sizes (cards/digest/scene/system — computed at assembly), and provider `usage` fields **only when reported** (null otherwise; never invented; Kimi RPC exposure of `usage` is UNVERIFIED until checked).
+- Every run/researcher session logs metrics to a durable per-run file under `data/recordings/usage/`.
+- L0 tests: wrapper over ScriptedModel asserts record contents and null-provider behavior; merge bar (`pytest`, `ruff`) green.
+- A `summarize()` (or CLI) producing per-run and per-call-type aggregates (calls, chars in/out, tool calls).
+- Zero behavior change: pure wrapper; annotator and researcher constructible with or without it.
+
 ## Evaluating the t1–40 run (when it completes)
 
 - **Gold-coverage hard criterion** (Matt): the glossary should have an entry for *every* backlink in every published thread wiki page (218 unique entities across pages 3–40). Extra entries are fine — the bar is coverage, not exact match. Hardest class: books the protagonist reads — they look like texture but are inventory items with mechanical significance (reading grows the vys pool / teaches techniques). Consider a `book`/`document` tag prior boost during researcher passes.
