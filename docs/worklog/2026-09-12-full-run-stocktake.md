@@ -38,10 +38,16 @@ Not a disaster, and NOT a reason to revert: the prompt fixed its target classes.
 2. **Restart the run only on Matt's explicit go-ahead** (the Sep 11 quota reset has passed, but Matt paused the run Sep 7 — no restart without authorization). When restarted: style tweak (discourage bookkeeping caps and pure-scenery entries), resume from checkpoint 31411898:4.
 3. Post-run: researcher alias pass (same as t1–40) then coverage analysis.
 
+
+## Cost autopsy (2026-09-12): cost-increase mechanisms (per-batch, measured) — NOT a measured quota multiplier
+
+**Measured per-batch structure** (transcript data, not billing): tool calls 2.7 → 8.5; prompt chars 34.5k → 99.5k; output chars 1.1k → 2.3k; entries 0.43 → 1.64 per batch. Total prompt volume 14.4M vs 27.6M chars for 2/3 the batches.
+
+**Attribution caveats**: stored character volume is NOT provider-billed tokens (unknown tokenizer + possible cache pricing); the 7-day quota delta (33%→100%) also includes the researcher pass, chat probes, retries, and Matt's interactive usage — the ~10–25× quota multiplier is an UNVERIFIED proxy and must not be quoted as measured. The structural per-batch multipliers (~3× turns, ~3× prompt size, 2× output) ARE measured and suffice for the design lesson.
+
+**Mechanisms (structural, confirmed)**: (1) liberal admission → more proposals → more tool calls → more follow-up turns; each turn re-sends the full context cold — `OmpRpcClient` spawns one fresh process per call, so no prefix caching (mechanism valid; its share of billed cost is hypothesis). (2) Growing glossary → bigger injected card blocks every subsequent batch. (3) Full-restate rule → longer outputs and bigger cards downstream. Fixes to test in the ladder: per-batch proposal cap, dedupe-before-propose, shorter glosses, tool-round budget.
+
 ## 2026-09-12 — discussion: prompt laddering + model onboarding
 
 Matt floated (pre-handover): A/B prompt variants on a 5-thread slice with criteria scoring; onboarding Deepseek v4.1 Flash via the same scorecard; model provenance in blame + rehydrate-with-generating-model; usage circuit-breaking (80% weekly or $x); prompts separated by agent and by metrics. Design note: docs/design/prompt-laddering.md. Key planning fact: full-quest run covered 25/278 threads on ONE weekly Kimi quota (~10–11 windows at current pace).
 
-## Cost autopsy (2026-09-12): why the revised prompt cost ~10x
-
-Per-batch, t1-40 vs full-run: tool calls 2.7 → 8.5; prompt chars 34.5k → 99.5k; output chars 1.1k → 2.3k; entries 0.43 → 1.64. Total prompt volume 14.4M vs 27.6M chars for 2/3 the batches. Mechanisms: (1) liberal admission → more proposals per batch → more tool calls → more follow-up turns, each re-sending the full cold context (per-call fresh RPC process = no prefix cache); (2) growing glossary → bigger injected card blocks every subsequent batch; (3) full-restate rule → longer outputs and bigger cards downstream. Not one cause: turns × context growth × output growth, multiplied. Fixes to test in the ladder: per-batch proposal cap, dedupe-before-propose, shorter glosses, tool-round budget.
