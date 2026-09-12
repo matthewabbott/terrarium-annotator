@@ -47,6 +47,8 @@ Not a disaster, and NOT a reason to revert: the prompt fixed its target classes.
 
 **Mechanisms (structural, confirmed)**: (1) liberal admission → more proposals → more tool calls → more follow-up turns; each turn re-sends the full context cold — `OmpRpcClient` spawns one fresh process per call, so no prefix caching (mechanism valid; its share of billed cost is hypothesis). (2) Growing glossary → bigger injected card blocks every subsequent batch. (3) Full-restate rule → longer outputs and bigger cards downstream. Fixes to test in the ladder: per-batch proposal cap, dedupe-before-propose, shorter glosses, tool-round budget.
 
+**Correction (advisory)**: 8.5 tool calls/batch does NOT establish the 8-round turn cap was hit — turns were 3.5/batch, so most batches ran under it. Whether the cap was ever reached is a hypothesis to instrument, not a measured fact.
+
 ## 2026-09-12 — discussion: prompt laddering + model onboarding
 
 Matt floated (pre-handover): A/B prompt variants on a 5-thread slice with criteria scoring; onboarding Deepseek v4.1 Flash via the same scorecard; model provenance in blame + rehydrate-with-generating-model; usage circuit-breaking (80% weekly or $x); prompts separated by agent and by metrics. Design note: docs/design/prompt-laddering.md. Key planning fact: full-quest run covered 25/278 threads on ONE weekly Kimi quota (~10–11 windows at current pace).
