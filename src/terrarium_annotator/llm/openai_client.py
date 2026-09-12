@@ -12,6 +12,8 @@ import time
 import requests
 
 from terrarium_annotator.llm.base import (
+    AttemptEvent,
+    AttemptObserver,
     ChatClientError,
     ChatResponse,
     parse_choice,
@@ -28,6 +30,7 @@ class OpenAICompatibleClient:
         timeout: float = 120.0,
         max_retries: int = 3,
         session: requests.Session | None = None,
+        attempt_observer: AttemptObserver | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
@@ -41,6 +44,8 @@ class OpenAICompatibleClient:
             else f"{self.base_url}/v1/chat/completions"
         )
         self._session = session or requests.Session()
+        # Read at call time: InstrumentedClient (re)wires it per call.
+        self.attempt_observer = attempt_observer
         if api_key:
             self._session.headers["Authorization"] = f"Bearer {api_key}"
 
@@ -62,7 +67,8 @@ class OpenAICompatibleClient:
             payload["tools"] = tools
 
         last_error: str | None = None
-        for attempt in range(self.max_retries):
+        for attempt in range(1, self.max_retries + 1):
+            t0 = time.monotonic()
             try:
                 resp = self._session.post(
                     self._endpoint,
@@ -70,22 +76,46 @@ class OpenAICompatibleClient:
                     timeout=self.timeout,
                 )
             except requests.RequestException as exc:
+                self._observe(attempt, "error", type(exc).__name__, t0)
                 last_error = str(exc)
             else:
                 if resp.status_code < 500:
-                    break  # 2xx handled below; 4xx fails fast
+                    if resp.status_code != 200:  # 4xx fails fast
+                        self._observe(attempt, "error", f"HTTP{resp.status_code}", t0)
+                        raise ChatClientError(
+                            f"HTTP {resp.status_code}: {resp.text[:200]}"
+                        )
+                    try:
+                        body = resp.json()
+                    except ValueError as exc:
+                        self._observe(attempt, "error", "NonJSONResponse", t0)
+                        raise ChatClientError(f"non-JSON response body: {exc}") from exc
+                    try:
+                        parsed = parse_choice(body)
+                    except ChatClientError as exc:
+                        # 200 but unusable envelope — the attempt FAILED;
+                        # observe before raising so it isn't logged success.
+                        self._observe(attempt, "error", type(exc).__name__, t0)
+                        raise
+                    self._observe(attempt, "success", None, t0)
+                    return parsed
+                self._observe(attempt, "error", f"HTTP{resp.status_code}", t0)
                 last_error = f"HTTP {resp.status_code}"
-            if attempt < self.max_retries - 1:
-                time.sleep(0.5 * (2**attempt))
-        else:
-            raise ChatClientError(
-                f"chat failed after {self.max_retries} attempts: {last_error}"
-            )
+            if attempt < self.max_retries:
+                time.sleep(0.5 * (2 ** (attempt - 1)))
+        raise ChatClientError(
+            f"chat failed after {self.max_retries} attempts: {last_error}"
+        )
 
-        if resp.status_code != 200:
-            raise ChatClientError(f"HTTP {resp.status_code}: {resp.text[:200]}")
-        try:
-            body = resp.json()
-        except ValueError as exc:
-            raise ChatClientError(f"non-JSON response body: {exc}") from exc
-        return parse_choice(body)
+    def _observe(
+        self, attempt: int, status: str, error_type: str | None, t0: float
+    ) -> None:
+        if self.attempt_observer is not None:
+            self.attempt_observer(
+                AttemptEvent(
+                    attempt=attempt,
+                    status=status,
+                    error_type=error_type,
+                    duration_s=time.monotonic() - t0,
+                )
+            )

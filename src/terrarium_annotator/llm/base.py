@@ -5,9 +5,8 @@ this layer speaks `ChatClient.chat()`; providers are interchangeable
 (OpenAI-compatible HTTP now; omp RPC or local servers later).
 """
 
-from __future__ import annotations
-
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -32,6 +31,25 @@ class ChatResponse:
 
 class ChatClientError(Exception):
     """Provider or protocol failure."""
+
+
+@dataclass(frozen=True)
+class AttemptEvent:
+    """One provider-call attempt inside a chat() — internal retries included.
+
+    Clients that retry internally (OmpRpcClient, OpenAICompatibleClient)
+    emit one event per attempt to their optional `attempt_observer`; an
+    outer wrapper alone cannot see these attempts (telemetry design:
+    docs/plan/aspirations.md §"NEXT: usage telemetry").
+    """
+
+    attempt: int
+    status: str  # "success" | "error"
+    error_type: str | None = None
+    duration_s: float = 0.0
+
+
+AttemptObserver = Callable[[AttemptEvent], None]
 
 
 class ChatClient(Protocol):

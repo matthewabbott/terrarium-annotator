@@ -2,6 +2,8 @@
 omp RPC adapter."""
 
 from terrarium_annotator.llm.base import (
+    AttemptEvent,
+    AttemptObserver,
     ChatClient,
     ChatClientError,
     ChatResponse,
@@ -17,18 +19,34 @@ from terrarium_annotator.llm.scripted import (
     response_from_json,
     response_to_json,
 )
+from terrarium_annotator.llm.telemetry import (
+    InstrumentedClient,
+    UsageLog,
+    format_summary,
+    make_run_id,
+    summarize,
+    usage_log_path,
+)
 
 __all__ = [
+    "AttemptEvent",
+    "AttemptObserver",
     "ChatClient",
     "ChatClientError",
     "ChatResponse",
+    "InstrumentedClient",
     "OmpRpcClient",
     "OpenAICompatibleClient",
     "RecordingClient",
     "ReplayClient",
     "ScriptedModel",
     "ToolCall",
+    "UsageLog",
+    "format_summary",
+    "make_run_id",
     "parse_choice",
     "response_from_json",
     "response_to_json",
+    "summarize",
+    "usage_log_path",
 ]

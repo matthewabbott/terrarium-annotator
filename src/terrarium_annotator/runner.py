@@ -20,6 +20,7 @@ from terrarium_annotator.corpus import DEFAULT_BATCH_SIZE, Batch, CorpusReader, 
 from terrarium_annotator.glossary import GlossaryStore, Provenance
 from terrarium_annotator.inject import CardView, select_cards
 from terrarium_annotator.llm import ChatClient, ChatClientError, ChatResponse
+from terrarium_annotator.llm.telemetry import InstrumentedClient
 from terrarium_annotator.memory import StoryLog
 from terrarium_annotator.state import (
     load_run_state,
@@ -77,6 +78,7 @@ class Runner:
         llm: ChatClient,
         conn: sqlite3.Connection,
         config: RunnerConfig | None = None,
+        telemetry: InstrumentedClient | None = None,
     ) -> None:
         self.corpus = corpus
         self.memory = memory
@@ -84,6 +86,9 @@ class Runner:
         self.llm = llm
         self.conn = conn
         self.config = config or RunnerConfig()
+        # Optional usage telemetry (default None = zero behavior change).
+        # When wired, MUST be the same InstrumentedClient wrapping self.llm.
+        self.telemetry = telemetry
         self._provenance: Provenance | None = None
         self.dispatcher = ToolDispatcher(
             glossary,
@@ -192,13 +197,25 @@ class Runner:
             for i in self.memory.cover(cfg.digest_budget_lines)
         )
 
+        cards_text = "\n".join(f"{c.term}: {c.gloss}" for c in cards)
+        scene_text = "\n\n".join(f"[post {p.id}]\n{p.body}" for p in batch.posts)
+        if self.telemetry is not None:
+            self.telemetry.set_call_type("annotation")
+            # Component char sizes computed here, at assembly.
+            self.telemetry.set_context(
+                {
+                    "system": len(SYSTEM_PROMPT),
+                    "cards": len(cards_text),
+                    "digest": len(digest),
+                    "scene": len(scene_text),
+                }
+            )
+
         user = (
             f"<story_so_far>\n{digest}\n</story_so_far>\n\n"
-            f"<known_glossary>\n"
-            + "\n".join(f"{c.term}: {c.gloss}" for c in cards)
-            + "\n</known_glossary>\n\n"
+            f"<known_glossary>\n" + cards_text + "\n</known_glossary>\n\n"
             f"<batch thread={thread.id} index={batch.index}>\n"
-            + "\n\n".join(f"[post {p.id}]\n{p.body}" for p in batch.posts)
+            + scene_text
             + "\n</batch>"
         )
         messages = [
@@ -324,9 +341,15 @@ class Runner:
                     f"#{a}-{b - 1} {self.memory._settled(a, b)}"
                     for a, b in ((lo, mid), (mid, hi))
                 )
+            system = MERGE_PROMPT.format(body=body)
+            if self.telemetry is not None:
+                self.telemetry.set_call_type("merge-settle")
+                self.telemetry.set_context(
+                    {"system": len(system), "cards": 0, "digest": 0, "scene": 0}
+                )
             response = self.llm.chat(
                 [
-                    {"role": "system", "content": MERGE_PROMPT.format(body=body)},
+                    {"role": "system", "content": system},
                     {"role": "user", "content": "Compress now."},
                 ],
                 max_tokens=256,

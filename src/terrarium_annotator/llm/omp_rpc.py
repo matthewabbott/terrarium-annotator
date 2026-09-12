@@ -28,6 +28,8 @@ import threading
 import time
 
 from terrarium_annotator.llm.base import (
+    AttemptEvent,
+    AttemptObserver,
     ChatClientError,
     ChatResponse,
     ToolCall,
@@ -145,6 +147,7 @@ class OmpRpcClient:
         timeout: float = 300.0,
         attempts: int = 2,
         preflight: bool = True,
+        attempt_observer: AttemptObserver | None = None,
     ) -> None:
         self.model = model
         self.provider = provider
@@ -156,6 +159,8 @@ class OmpRpcClient:
         self.timeout = timeout
         self.attempts = attempts
         self._preflight_done = not preflight
+        # Read at call time: InstrumentedClient (re)wires it per call.
+        self.attempt_observer = attempt_observer
 
     def chat(
         self,
@@ -166,10 +171,12 @@ class OmpRpcClient:
     ) -> ChatResponse:
         """One prompt against a fresh stateless RPC process, retried up to
         `self.attempts` times (fresh process each) on EmptyResponseError /
-        RPCTimeoutError. Retry budget is per call — no instance state."""
+        RPCTimeoutError. Retry budget is per call — no instance state. Every
+        attempt (success or failure, retried or not) is reported to
+        `self.attempt_observer` when one is wired."""
         prompt = serialize_messages(messages, tools)
         last_error: ChatClientError | None = None
-        for _ in range(self.attempts):
+        for attempt in range(1, self.attempts + 1):
             proc = subprocess.Popen(
                 self._command,
                 stdin=subprocess.PIPE,
@@ -177,10 +184,19 @@ class OmpRpcClient:
                 stderr=subprocess.DEVNULL,
                 text=True,
             )
+            t0 = time.monotonic()
             try:
-                return self._exchange(proc, prompt)
+                response = self._exchange(proc, prompt)
             except (EmptyResponseError, RPCTimeoutError) as exc:
+                self._observe(attempt, "error", type(exc).__name__, t0)
                 last_error = exc
+            except ChatClientError as exc:
+                # Not retried (protocol/launch failure) — still observed.
+                self._observe(attempt, "error", type(exc).__name__, t0)
+                raise
+            else:
+                self._observe(attempt, "success", None, t0)
+                return response
             finally:
                 try:
                     proc.stdin.close()
@@ -192,6 +208,19 @@ class OmpRpcClient:
                     proc.kill()
         assert last_error is not None
         raise last_error
+
+    def _observe(
+        self, attempt: int, status: str, error_type: str | None, t0: float
+    ) -> None:
+        if self.attempt_observer is not None:
+            self.attempt_observer(
+                AttemptEvent(
+                    attempt=attempt,
+                    status=status,
+                    error_type=error_type,
+                    duration_s=time.monotonic() - t0,
+                )
+            )
 
     def _send(self, proc: subprocess.Popen, obj: dict) -> None:
         proc.stdin.write(json.dumps(obj) + "\n")
@@ -249,7 +278,18 @@ class OmpRpcClient:
                 text = self._assistant_text(frame.get("messages", []))
                 if text is None:
                     raise EmptyResponseError("agent ended with no assistant text")
-                return parse_response_text(text)
+                resp = parse_response_text(text)
+                # Preserve any optional telemetry fields the runtime emits
+                # (omp rpc.md: agent_end may carry them; names undocumented)
+                # so telemetry can record provider usage if it ever appears.
+                extra = {
+                    k: v for k, v in frame.items() if k not in ("type", "messages")
+                }
+                return ChatResponse(
+                    content=resp.content,
+                    tool_calls=resp.tool_calls,
+                    raw={"agent_end": extra},
+                )
 
     @staticmethod
     def _assistant_text(messages: list[dict]) -> str | None:

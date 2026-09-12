@@ -8,7 +8,8 @@ prompt (cross-process, via the counter) — used for timeout-retry tests.
 FAKE_OMP_COUNTER = path to a counter file: each OmpRpcClient chat() spawns
 a fresh process, so the counter persists prompt position across processes
 (retries see the NEXT script entry). Emits unsolicited noise frames like
-the real server.
+the real server. FAKE_OMP_USAGE = JSON object added as a `usage` field on
+the agent_end frame (telemetry-plumbing tests).
 """
 
 import json
@@ -106,23 +107,20 @@ def main():
             if "error" in entry:
                 fail(cmd.get("id"), "prompt", entry["error"])
             else:
-                sys.stdout.write(
-                    json.dumps(
+                frame = {
+                    "type": "agent_end",
+                    "isTerminal": True,
+                    "messages": [
                         {
-                            "type": "agent_end",
-                            "isTerminal": True,
-                            "messages": [
-                                {
-                                    "role": "assistant",
-                                    "content": [
-                                        {"type": "text", "text": entry["text"]}
-                                    ],
-                                }
-                            ],
+                            "role": "assistant",
+                            "content": [{"type": "text", "text": entry["text"]}],
                         }
-                    )
-                    + "\n"
-                )
+                    ],
+                }
+                usage = os.environ.get("FAKE_OMP_USAGE")
+                if usage:
+                    frame["usage"] = json.loads(usage)
+                sys.stdout.write(json.dumps(frame) + "\n")
             sys.stdout.flush()
 
 

@@ -15,7 +15,17 @@ from pathlib import Path
 
 from terrarium_annotator.corpus import CorpusReader
 from terrarium_annotator.glossary import GlossaryStore
-from terrarium_annotator.llm import ChatClient, OmpRpcClient, RecordingClient
+from terrarium_annotator.llm import (
+    ChatClient,
+    InstrumentedClient,
+    OmpRpcClient,
+    RecordingClient,
+    UsageLog,
+    format_summary,
+    make_run_id,
+    summarize,
+    usage_log_path,
+)
 from terrarium_annotator.memory import StoryLog
 from terrarium_annotator.runner import Runner, RunnerConfig
 from terrarium_annotator.state import connect_annotator_db
@@ -54,6 +64,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--record", default=None, help="Append raw request/response JSONL here (L4)"
     )
+    run.add_argument(
+        "--usage-dir",
+        default="data/recordings/usage",
+        help="Per-run usage telemetry JSONL directory (always recorded)",
+    )
 
     chat = sub.add_parser(
         "chat", help="Talk to the archivist about the glossary/story (read-only)"
@@ -64,6 +79,11 @@ def build_parser() -> argparse.ArgumentParser:
     chat.add_argument("--timeout", type=float, default=300.0)
     chat.add_argument(
         "--once", default=None, help="Ask one question and exit (non-interactive)"
+    )
+    chat.add_argument(
+        "--usage-dir",
+        default="data/recordings/usage",
+        help="Per-session usage telemetry JSONL directory (always recorded)",
     )
 
     research = sub.add_parser(
@@ -77,12 +97,27 @@ def build_parser() -> argparse.ArgumentParser:
         "--focus", default=None, help="Session focus, e.g. 'aliases and retitles'"
     )
     research.add_argument("--record", default=None)
+    research.add_argument(
+        "--usage-dir",
+        default="data/recordings/usage",
+        help="Per-session usage telemetry JSONL directory (always recorded)",
+    )
 
     verify_parser = sub.add_parser(
         "verify", help="Check annotator DB invariants against the corpus"
     )
     verify_parser.add_argument("--corpus-db", required=True)
     verify_parser.add_argument("--annotator-db", required=True)
+
+    usage = sub.add_parser(
+        "usage-summary", help="Aggregate usage telemetry per run / call type"
+    )
+    usage.add_argument(
+        "path",
+        help="Usage JSONL file or directory (default: data/recordings/usage)",
+        nargs="?",
+        default="data/recordings/usage",
+    )
     return parser
 
 
@@ -95,6 +130,14 @@ def run_pass(
     memory = StoryLog(conn)
     glossary = GlossaryStore(conn, corpus.post_body)
     client: ChatClient = client_factory(args.model)
+    run_id = make_run_id(args.pass_id)
+    log = UsageLog(usage_log_path(args.usage_dir, run_id))
+    # Telemetry innermost: internal client retries stay observable even
+    # when RecordingClient wraps outside it.
+    instrumented = InstrumentedClient(
+        client, log, run_id=run_id, call_type="annotation"
+    )
+    client = instrumented
     if args.record:
         Path(args.record).parent.mkdir(parents=True, exist_ok=True)
         client = RecordingClient(client, args.record)
@@ -105,6 +148,7 @@ def run_pass(
         client,
         conn,
         RunnerConfig(pass_id=args.pass_id),
+        telemetry=instrumented,
     )
     runner.run(max_batches=args.max_batches, only_threads=args.threads)
     return 0
@@ -115,6 +159,9 @@ def main(
     client_factory: Callable[[str], ChatClient] | None = None,
 ) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "usage-summary":
+        print(format_summary(summarize(args.path)))
+        return 0
 
     if args.command == "verify":
         conn = sqlite3.connect(f"file:{args.annotator_db}?mode=ro", uri=True)
@@ -148,7 +195,13 @@ def main(
         factory = client_factory or (
             lambda model: OmpRpcClient(model=model, timeout=args.timeout)
         )
-        client = factory(args.model)
+        run_id = make_run_id("chat")
+        client = InstrumentedClient(
+            factory(args.model),
+            UsageLog(usage_log_path(args.usage_dir, run_id)),
+            run_id=run_id,
+            call_type="chat",
+        )
         if args.once is not None:
             messages = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}]
             messages.append({"role": "user", "content": args.once})
@@ -166,6 +219,13 @@ def main(
             client_factory(args.model)
             if client_factory
             else (OmpRpcClient(model=args.model, timeout=args.timeout))
+        )
+        run_id = make_run_id("research")
+        client = InstrumentedClient(
+            client,
+            UsageLog(usage_log_path(args.usage_dir, run_id)),
+            run_id=run_id,
+            call_type="researcher",
         )
         if args.record:
             Path(args.record).parent.mkdir(parents=True, exist_ok=True)
