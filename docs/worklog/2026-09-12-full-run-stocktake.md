@@ -22,12 +22,19 @@ Full-run produces **2.5–5× more entries than the baseline in 15 of 25 threads
 
 **Gloss style notes**: the `(q.v.)` cross-reference style the model adopted is genuinely wiki-useful; the ALL-CAPS bookkeeping ("TWO REGIMES NOW ATTESTED: (1) FRAGMENTS", "ACQUISITION CORRECTED BY THE AUTHOR") is the full-restate rule producing ledger noise — probably wants a style instruction next revision.
 
-## Verdict
+## Verdict — corrected framing (post-review)
 
-Not a disaster, and NOT a reason to revert: the prompt fixed its target classes and the shadow gate caught the over-admission in-flight (that's what it's for). The current pass is ~half-good capture, ~half texture to prune. **Pruning is now the priority workload**: 239 flagged candidates await the researcher prune pass; the gate's whole purpose is that this is reversible and evidence-backed.
+Not a disaster, and NOT a reason to revert: the prompt fixed its target classes. The 53% shadow-flag rate is a **distribution-shift signal, not a quality metric** — the shadow heuristic is a lexical would-defer detector, and our own calibration found ~half of flagged terms valid. What we can say from evidence:
+
+- The relaxed prompt changed admission behavior materially (53% flagged vs 13% baseline; 2.5–5× density in 15/25 threads). That's a behavior fact, not a quality verdict.
+- The flagged set is a **candidate review set, not a junk queue**: the stratified sample shows both (`inn keeper`, `a bundle of something`, `empty house`, `magical experiments` — texture) and (`gleaming automaton`, `secondary hearts`, `complementary elements`, `nature mage`, `blacksmith`, `port`, `tome` — clearly valid).
+- The unflagged stratified sample is mostly solid (`+2 bonus`, `Battle at Eshnuk`, `Confuse`, `Manipulator`, `Shockwave Sword`, `Hazmat function`, `Research area`) with minor oddities (`PROLUO`, `Tiny little robots`).
+- The earlier sample readings in this report were non-stratified (first-30 and random-20) — usable for illustration, not for rates.
+
+**So: permissiveness vs the baseline is a hypothesis to adjudicate, not a verdict.** The correct workload is adjudication of the flagged candidates (researcher review pass, quote-audited), not bulk cull-demotion. Do NOT prune all 239 on the flag alone.
 
 ## Recommended next steps (Matt's call)
 
-1. **Pruning researcher pass** on `annotator-full.db` (239 flagged + scan of the unflagged for stragglers), cull-demote to graveyard.
-2. **Restart the run after Sep 11 quota reset** with a style tweak to the prompt (discourage bookkeeping caps and pure-scenery entries) — resume from checkpoint 31411898:4.
+1. **Adjudication pass** on the 239 flagged candidates (researcher, cull-demote only clear texture to graveyard; keep/upgrade the valids) — plus a scan of the unflagged 216 for stragglers (`PROLUO`-class).
+2. **Restart the run after Sep 11 quota reset** with a style tweak (discourage bookkeeping caps and pure-scenery entries) — resume from checkpoint 31411898:4.
 3. Post-run: researcher alias pass (same as t1–40) then coverage analysis.
