@@ -34,7 +34,6 @@ Not a disaster, and NOT a reason to revert: the prompt fixed its target classes.
 **So: permissiveness vs the baseline is a hypothesis to adjudicate, not a verdict.** The correct workload is adjudication of the flagged candidates (researcher review pass, quote-audited), not bulk cull-demotion. Do NOT prune all 239 on the flag alone.
 
 ## Recommended next steps (Matt's call)
-
 1. **Adjudication pass** on the 239 flagged candidates (researcher, cull-demote only clear texture to graveyard; keep/upgrade the valids) — plus a scan of the unflagged 216 for stragglers (`PROLUO`-class).
-2. **Restart the run after Sep 11 quota reset** with a style tweak (discourage bookkeeping caps and pure-scenery entries) — resume from checkpoint 31411898:4.
+2. **Restart the run only on Matt's explicit go-ahead** (the Sep 11 quota reset has passed, but Matt paused the run Sep 7 — no restart without authorization). When restarted: style tweak (discourage bookkeeping caps and pure-scenery entries), resume from checkpoint 31411898:4.
 3. Post-run: researcher alias pass (same as t1–40) then coverage analysis.
