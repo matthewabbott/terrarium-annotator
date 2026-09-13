@@ -122,6 +122,35 @@ def build_parser() -> argparse.ArgumentParser:
         "(default 0.50; <=0 disables)",
     )
 
+    adj = sub.add_parser(
+        "adjudicate",
+        help="Bounded quote-audit of shadow-flagged candidates "
+        "(read/audit tools + propose_demotion ONLY; hard-wired allowlist)",
+    )
+    adj.add_argument("--corpus-db", required=True)
+    adj.add_argument("--annotator-db", required=True)
+    adj.add_argument("--model", default="kimi-k2.5")
+    adj.add_argument("--timeout", type=float, default=300.0)
+    adj.add_argument("--sample-size", type=int, default=50)
+    adj.add_argument("--chunk-size", type=int, default=12)
+    adj.add_argument(
+        "--work-dir",
+        default=None,
+        help="Chunk reports + sample.json (default: data/adjudication/<run-id>)",
+    )
+    adj.add_argument(
+        "--quota-breaker",
+        type=float,
+        default=0.50,
+        help="Halt when 7-day Kimi quota usedFraction reaches this "
+        "(default 0.50; <=0 disables)",
+    )
+    adj.add_argument(
+        "--usage-dir",
+        default="data/recordings/usage",
+        help="Per-session usage telemetry JSONL directory (always recorded)",
+    )
+
     verify_parser = sub.add_parser(
         "verify", help="Check annotator DB invariants against the corpus"
     )
@@ -275,6 +304,60 @@ def main(
             print(f"research: quota breaker halt: {exc}", file=sys.stderr)
             return 3
         print(report)
+        return 0
+
+    if args.command == "adjudicate":
+        from terrarium_annotator.adjudicate import (
+            backup_db,
+            load_flagged_candidates,
+            run_adjudication,
+            stratified_sample,
+        )
+
+        try:
+            backup_path = backup_db(args.annotator_db)
+        except (OSError, RuntimeError) as exc:
+            print(f"adjudicate: backup failed, refusing to run: {exc}", file=sys.stderr)
+            return 2
+        print(f"adjudicate: backup verified at {backup_path}")
+
+        corpus = CorpusReader(args.corpus_db)
+        conn = connect_annotator_db(args.annotator_db)
+        client: ChatClient = (
+            client_factory(args.model)
+            if client_factory
+            else (OmpRpcClient(model=args.model, timeout=args.timeout))
+        )
+        run_id = make_run_id("adjudicate")
+        client = InstrumentedClient(
+            client,
+            UsageLog(usage_log_path(args.usage_dir, run_id)),
+            run_id=run_id,
+            call_type="researcher",
+        )
+        candidates = load_flagged_candidates(conn)
+        sample = stratified_sample(candidates, args.sample_size)
+        work_dir = (
+            Path(args.work_dir)
+            if args.work_dir
+            else (Path("data/adjudication") / run_id)
+        )
+        result = run_adjudication(
+            corpus,
+            conn,
+            client,
+            sample,
+            work_dir,
+            chunk_size=args.chunk_size,
+            quota_check=quota_check_factory(args.quota_breaker),
+        )
+        print(
+            f"adjudicate: {result.chunks_completed} chunks completed, "
+            f"{result.chunks_failed} failed; reports in {work_dir}"
+        )
+        if result.halted:
+            print(f"adjudicate: HALTED — {result.halted}", file=sys.stderr)
+            return 3
         return 0
 
     if args.command == "run":

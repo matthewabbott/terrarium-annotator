@@ -178,6 +178,27 @@ TOOL_SCHEMAS = [
         },
         ["term_a", "term_b", "rationale", "evidence"],
     ),
+    _schema(
+        "propose_demotion",
+        "Propose demoting an entry to the graveyard (texture/scenery not "
+        "worth a glossary entry). Queued for human review; NEVER demotes "
+        "directly. Requires a rationale and a verbatim quote mentioning "
+        "the term — the anchor being judged.",
+        {
+            "term": {"type": "string"},
+            "rationale": {"type": "string"},
+            "evidence": {
+                "type": "object",
+                "properties": {
+                    "post_id": {"type": "integer"},
+                    "quote": {"type": "string"},
+                },
+                "required": ["post_id", "quote"],
+                "additionalProperties": False,
+            },
+        },
+        ["term", "rationale", "evidence"],
+    ),
 ]
 
 # The annotator (serial reader) gets exactly these — no corpus lookahead,
@@ -197,6 +218,18 @@ RESEARCHER_TOOLS = ANNOTATOR_TOOLS | {
     "search_corpus",
     "rename_entry",
     "propose_merge",
+}
+
+# Adjudication sessions (bounded quote-audit passes): read/audit tools
+# plus demotion proposals ONLY. No entry writes, renames, or merges.
+ADJUDICATION_TOOLS = {
+    "fetch_entry",
+    "fetch_post",
+    "fetch_thread_range",
+    "recall_story",
+    "search_glossary",
+    "search_corpus",
+    "propose_demotion",
 }
 
 
@@ -369,6 +402,14 @@ class ToolDispatcher:
                 Evidence(post_id=int(ev["post_id"]), quote=ev["quote"]),
             )
             return {"merge_queue_id": qid, "status": "pending"}
+        if call.name == "propose_demotion":
+            ev = a["evidence"]
+            qid = self._glossary.propose_demotion(
+                a["term"],
+                a["rationale"],
+                Evidence(post_id=int(ev["post_id"]), quote=ev["quote"]),
+            )
+            return {"demote_queue_id": qid, "status": "pending"}
         raise ValueError(f"unknown tool {call.name!r}")
 
     @staticmethod

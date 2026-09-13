@@ -102,6 +102,17 @@ CREATE TABLE IF NOT EXISTS merge_queue(
         CHECK (status IN ('pending', 'accepted', 'rejected')),
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS demote_queue(
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entry_id INTEGER NOT NULL REFERENCES entry(id),
+    term TEXT NOT NULL,
+    rationale TEXT NOT NULL,
+    quote TEXT NOT NULL,
+    post_id INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'accepted', 'rejected')),
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -597,6 +608,44 @@ class GlossaryStore:
         )
         self._conn.commit()
         return cur.lastrowid
+
+    def propose_demotion(self, term: str, rationale: str, evidence: Evidence) -> int:
+        """Queue a demotion (graveyard) proposal for human review. NEVER
+        demotes directly — entry.status has no graveyard value, and
+        applying demotions is a human action. Evidence quote must be
+        verbatim from the cited post and mention the term: the quote is
+        the anchor being judged texture."""
+        entry = self.get(term)
+        if not rationale.strip():
+            raise GlossaryError("demotion requires a rationale")
+        body = self._post_body(evidence.post_id)
+        if body is None:
+            raise QuoteRejected(f"post {evidence.post_id} not in corpus")
+        if evidence.quote not in body:
+            raise QuoteRejected(f"quote is not verbatim in post {evidence.post_id}")
+        if entry.term not in evidence.quote:
+            raise QuoteRejected(f"quote does not mention {entry.term!r}")
+        cur = self._conn.execute(
+            "INSERT INTO demote_queue(entry_id, term, rationale, quote,"
+            " post_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                entry.id,
+                entry.term,
+                rationale.strip(),
+                evidence.quote,
+                evidence.post_id,
+                _now(),
+            ),
+        )
+        self._conn.commit()
+        return cur.lastrowid
+
+    def demote_queue_pending(self) -> list[tuple]:
+        """Pending demotion proposals (id, entry_id, term, rationale)."""
+        return self._conn.execute(
+            "SELECT id, entry_id, term, rationale FROM demote_queue "
+            "WHERE status = 'pending' ORDER BY id"
+        ).fetchall()
 
     def merge_queue_pending(self) -> list[tuple]:
         """Pending merge proposals (id, term_a, term_b, rationale)."""

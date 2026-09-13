@@ -84,17 +84,20 @@ class Researcher:
             )
         return out
 
-    def research(self, focus: str | None = None) -> str:
-        """One research session. Returns the researcher's final report."""
+    def research(self, focus: str | None = None, overview: str | None = None) -> str:
+        """One research session. Returns the researcher's final report.
+
+        overview=None renders the full glossary overview; pass an explicit
+        string ("" allowed) for constrained sessions like adjudication."""
         focus_text = focus or "Work the charter in priority order."
         if self.quota_check is not None:
             self.quota_check()
+        overview_text = self._glossary_overview() if overview is None else overview
         messages: list[dict] = [
             {"role": "system", "content": self.system_prompt},
             {
                 "role": "user",
-                "content": self._glossary_overview()
-                + f"\n\nFocus for this session: {focus_text}",
+                "content": overview_text + f"\n\nFocus for this session: {focus_text}",
             },
         ]
         report = ""
