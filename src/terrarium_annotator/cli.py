@@ -171,6 +171,21 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         default="data/recordings/usage",
     )
+
+    ladder = sub.add_parser(
+        "ladder-score", help="Scorecard for one variant DB (gold coverage + cost)"
+    )
+    ladder.add_argument("--corpus-db", required=True)
+    ladder.add_argument("--annotator-db", required=True)
+    ladder.add_argument(
+        "--threads",
+        type=parse_threads,
+        required=True,
+        help="Comma-separated thread IDs the variant processed",
+    )
+    ladder.add_argument("--usage-file", default=None)
+    ladder.add_argument("--gold-set", default="data/exports/gold-set.json")
+    ladder.add_argument("--name", default="variant")
     return parser
 
 
@@ -230,6 +245,19 @@ def main(
         quota_check_factory = _default_quota_factory
     if args.command == "usage-summary":
         print(format_summary(summarize(args.path)))
+        return 0
+
+    if args.command == "ladder-score":
+        import json as _json
+
+        from terrarium_annotator.ladder import format_scorecard, scorecard
+
+        with open(args.gold_set) as f:
+            gold = _json.load(f)
+        conn = sqlite3.connect(f"file:{args.annotator_db}?mode=ro", uri=True)
+        with CorpusReader(args.corpus_db) as corpus:
+            sc = scorecard(conn, corpus, gold, args.threads, args.usage_file)
+        print(format_scorecard(args.name, sc))
         return 0
 
     if args.command == "verify":
