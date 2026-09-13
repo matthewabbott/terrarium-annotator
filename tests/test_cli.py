@@ -55,6 +55,7 @@ class TestRunCommand:
                 str(record),
             ],
             client_factory=lambda model: ScriptedModel(list(SCRIPT)),
+            quota_check_factory=lambda threshold: None,  # no real quota probe
         )
         assert code == 0
         # The pass ran: checkpoint at the end, config recorded, L4 log written.
@@ -81,6 +82,7 @@ class TestRunCommand:
                 "103",
             ],
             client_factory=lambda model: ScriptedModel(script),
+            quota_check_factory=lambda threshold: None,
         )
         assert code == 0
         import sqlite3
@@ -102,6 +104,7 @@ class TestRunCommand:
                 "999999",
             ],
             client_factory=lambda model: ScriptedModel([]),
+            quota_check_factory=lambda threshold: None,
         )
         assert code == 2
         assert "unknown thread ids" in capsys.readouterr().err
@@ -149,6 +152,7 @@ def test_research_subcommand(tmp_path, capsys):
             str(annotator_path),
         ],
         client_factory=lambda m: model,
+        quota_check_factory=lambda threshold: None,
     )
     assert code == 0
     assert "Nothing to change" in capsys.readouterr().out

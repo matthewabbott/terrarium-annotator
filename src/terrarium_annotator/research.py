@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Callable
 
 from terrarium_annotator.corpus import CorpusReader
 from terrarium_annotator.glossary import GlossaryStore, Provenance
@@ -46,6 +47,9 @@ class Researcher:
         conn: sqlite3.Connection,
         pass_id: str = "research",
         max_rounds: int = 40,
+        allowed: set[str] | None = None,
+        system_prompt: str = RESEARCHER_SYSTEM_PROMPT,
+        quota_check: Callable[[], None] | None = None,
     ) -> None:
         self.corpus = corpus
         self.glossary = glossary
@@ -54,12 +58,16 @@ class Researcher:
         self.pass_id = pass_id
         self.max_rounds = max_rounds
         self._prov = Provenance(thread_id=0, pass_id=pass_id)
+        self.system_prompt = system_prompt
+        # Quota circuit breaker (default None = unchecked): session start
+        # and before each tool round.
+        self.quota_check = quota_check
         self.dispatcher = ToolDispatcher(
             glossary,
             corpus,
             memory,
             provenance=lambda: self._prov,
-            allowed=RESEARCHER_TOOLS,
+            allowed=allowed if allowed is not None else RESEARCHER_TOOLS,
         )
 
     def _glossary_overview(self) -> str:
@@ -79,8 +87,10 @@ class Researcher:
     def research(self, focus: str | None = None) -> str:
         """One research session. Returns the researcher's final report."""
         focus_text = focus or "Work the charter in priority order."
+        if self.quota_check is not None:
+            self.quota_check()
         messages: list[dict] = [
-            {"role": "system", "content": RESEARCHER_SYSTEM_PROMPT},
+            {"role": "system", "content": self.system_prompt},
             {
                 "role": "user",
                 "content": self._glossary_overview()
@@ -91,6 +101,8 @@ class Researcher:
         work_done = False
         nudges = 0
         for _ in range(self.max_rounds):
+            if self.quota_check is not None:
+                self.quota_check()
             response: ChatResponse = self.client.chat(
                 messages, tools=self.dispatcher.schemas
             )

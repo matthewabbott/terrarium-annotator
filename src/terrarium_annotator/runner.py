@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from math import log1p
 
@@ -64,6 +65,7 @@ class RunnerConfig:
     max_tool_rounds: int = 8
     max_response_tokens: int = 2048
     tag_priors: dict[str, float] | None = None  # salience weight per tag
+    quota_threshold: float | None = 0.50  # weekly-window breaker; <=0 disables
 
 
 class Runner:
@@ -79,6 +81,7 @@ class Runner:
         conn: sqlite3.Connection,
         config: RunnerConfig | None = None,
         telemetry: InstrumentedClient | None = None,
+        quota_check: Callable[[], None] | None = None,
     ) -> None:
         self.corpus = corpus
         self.memory = memory
@@ -89,6 +92,10 @@ class Runner:
         # Optional usage telemetry (default None = zero behavior change).
         # When wired, MUST be the same InstrumentedClient wrapping self.llm.
         self.telemetry = telemetry
+        # Quota circuit breaker (default None = unchecked). Checked before
+        # each batch; a halt leaves run_state at the next unprocessed batch,
+        # so resume re-attempts it.
+        self.quota_check = quota_check
         self._provenance: Provenance | None = None
         self.dispatcher = ToolDispatcher(
             glossary,
@@ -147,6 +154,8 @@ class Runner:
             for batch in self.corpus.batches(thread.id, self.config.batch_size):
                 if ti == resume_idx and batch.index < resume_batch:
                     continue
+                if self.quota_check is not None:
+                    self.quota_check()
                 self._process_batch(thread, batch)
                 save_run_state(
                     self.conn, self.config.pass_id, thread.id, batch.index + 1

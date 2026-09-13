@@ -27,6 +27,11 @@ from terrarium_annotator.llm import (
     usage_log_path,
 )
 from terrarium_annotator.memory import StoryLog
+from terrarium_annotator.quota import (
+    QuotaExceeded,
+    QuotaProbeError,
+    make_quota_breaker,
+)
 from terrarium_annotator.runner import Runner, RunnerConfig
 from terrarium_annotator.state import connect_annotator_db
 from terrarium_annotator.tools import ToolDispatcher
@@ -69,6 +74,13 @@ def build_parser() -> argparse.ArgumentParser:
         default="data/recordings/usage",
         help="Per-run usage telemetry JSONL directory (always recorded)",
     )
+    run.add_argument(
+        "--quota-breaker",
+        type=float,
+        default=0.50,
+        help="Halt when 7-day Kimi quota usedFraction reaches this "
+        "(default 0.50; <=0 disables)",
+    )
 
     chat = sub.add_parser(
         "chat", help="Talk to the archivist about the glossary/story (read-only)"
@@ -102,6 +114,13 @@ def build_parser() -> argparse.ArgumentParser:
         default="data/recordings/usage",
         help="Per-session usage telemetry JSONL directory (always recorded)",
     )
+    research.add_argument(
+        "--quota-breaker",
+        type=float,
+        default=0.50,
+        help="Halt when 7-day Kimi quota usedFraction reaches this "
+        "(default 0.50; <=0 disables)",
+    )
 
     verify_parser = sub.add_parser(
         "verify", help="Check annotator DB invariants against the corpus"
@@ -121,8 +140,15 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _default_quota_factory(threshold: float) -> Callable[[], None] | None:
+    """Real breaker: probe `omp usage`; <=0 disables (unchecked)."""
+    return make_quota_breaker(threshold) if threshold > 0 else None
+
+
 def run_pass(
-    args: argparse.Namespace, client_factory: Callable[[str], ChatClient]
+    args: argparse.Namespace,
+    client_factory: Callable[[str], ChatClient],
+    quota_check_factory: Callable[[float], Callable[[], None] | None],
 ) -> int:
     """Wire stores + client and run. client_factory takes the model name."""
     corpus = CorpusReader(args.corpus_db)
@@ -147,8 +173,9 @@ def run_pass(
         glossary,
         client,
         conn,
-        RunnerConfig(pass_id=args.pass_id),
+        RunnerConfig(pass_id=args.pass_id, quota_threshold=args.quota_breaker),
         telemetry=instrumented,
+        quota_check=quota_check_factory(args.quota_breaker),
     )
     runner.run(max_batches=args.max_batches, only_threads=args.threads)
     return 0
@@ -157,8 +184,11 @@ def run_pass(
 def main(
     argv: list[str] | None = None,
     client_factory: Callable[[str], ChatClient] | None = None,
+    quota_check_factory: Callable[[float], Callable[[], None] | None] | None = None,
 ) -> int:
     args = build_parser().parse_args(argv)
+    if quota_check_factory is None:
+        quota_check_factory = _default_quota_factory
     if args.command == "usage-summary":
         print(format_summary(summarize(args.path)))
         return 0
@@ -237,8 +267,13 @@ def main(
             client,
             conn,
             pass_id="research",
+            quota_check=quota_check_factory(args.quota_breaker),
         )
-        report = researcher.research(focus=args.focus)
+        try:
+            report = researcher.research(focus=args.focus)
+        except (QuotaExceeded, QuotaProbeError) as exc:
+            print(f"research: quota breaker halt: {exc}", file=sys.stderr)
+            return 3
         print(report)
         return 0
 
@@ -247,10 +282,13 @@ def main(
             lambda model: OmpRpcClient(model=model, timeout=args.timeout)
         )
         try:
-            return run_pass(args, factory)
+            return run_pass(args, factory, quota_check_factory)
         except ValueError as exc:  # e.g. unknown --threads IDs
             print(f"run: {exc}", file=sys.stderr)
             return 2
+        except (QuotaExceeded, QuotaProbeError) as exc:
+            print(f"run: quota breaker halt: {exc}", file=sys.stderr)
+            return 3
 
     return 2
 
