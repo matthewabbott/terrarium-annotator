@@ -132,8 +132,10 @@ evidence either way from this pass.
 calls, 855k chars in / 21.5k chars out (est ~214k/~5.4k tokens).
 Per audited candidate: ~17.1k chars in, ~1.9 tool calls, ~12.3s wall.
 Weekly quota delta for the full 50-candidate pass: ~3 points (6% → 9%).
-At this rate, auditing ALL 239 flagged candidates costs ~9–10 weekly
-points — cheap. Provider usage fields: none emitted by omp (records all
+At this rate, auditing ALL 239 flagged candidates costs ~14 weekly points
+(linear extrapolation: ~3 points per 50 candidates × 239/50 ≈ 14.3;
+linear because per-chunk context is fixed-size — no glossary overview is
+loaded). Provider usage fields: none emitted by omp (records all
 provider_usage=0, consistent with the Q1 UNKNOWN verdict).
 
 **Verdict on the open hypothesis**: the full run's permissiveness vs the
@@ -161,6 +163,7 @@ restart.
 - Card-budget violations in the full run: instrument or fix the 15%
   enforcement before restart — this is now the strongest restart blocker.
 - Borderline-kept 4 (slavery, dark elf, timid girl, oud): Matt spot-check?
-- Full-candidate audit (all 239) is affordable (~9–10 weekly points) if
-  Matt wants the full precision number.
+- Full-candidate audit (all 239) costs ~14 weekly points (linear from the
+  measured 3-per-50) if Matt wants the full precision number — feasible
+  under the 50% breaker but not negligible.
 
