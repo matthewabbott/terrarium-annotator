@@ -61,7 +61,7 @@ findings to the t1–40 baseline insights. Spec: the /goal prompt (Matt,
   stratified_sample at size 50). Persisted:
   `data/adjudication/adjudicate-20260913T005301/sample.json`.
 
-## Phase 3 — the pass (RAN CLEAN; VERIFY GATE UNMET — pre-existing violations)
+## Phase 3 — the pass (COMPLETE; verify exit 0 after checker-bug fix)
 
 - 5 chunk sessions (12/12/12/12/2), Kimi k2.5, ADJUDICATION_TOOLS,
   quota breaker active (0.50; usage moved 6% → 9% for the whole pass).
@@ -69,18 +69,20 @@ findings to the t1–40 baseline insights. Spec: the /goal prompt (Matt,
 - **Writes proven clean**: table diff vs backup — entry/revision/
   entry_source/story_log/deferred_candidate/merge_queue IDENTICAL;
   only delta = 9 demote_queue inserts (all pending, human queue).
-- **BLOCKER (verbatim gate unmet)**: `verify` on annotator-full.db exits 1
-  with 9 budget-compliance violations ("card block over token budget",
-  threads 30936089/31283673/31323984/31411898). The PRE-PASS BACKUP
-  reproduces the identical 9 violations → they are historical artifacts of
-  the full run's growing card blocks, NOT adjudication damage. They cannot
-  be fixed without rewriting historical run data (forbidden). Gate intent
-  (pass did not corrupt provenance) is established by the backup
-  comparison; the literal exit-0 criterion is unachievable and reported
-  here per the stop-condition rule, NOT silently waived. **These
-  violations are themselves a finding**: the relaxed-prompt run exceeded
-  its own 15% card budget in at least 8 batches — budget enforcement
-  needs attention before any restart.
+- **Verify gate: initially exit 1, RESOLVED as a checker bug (evidence
+  below).** verify flagged 9 budget-compliance violations; the pre-pass
+  backup reproduced them identically, proving they predated adjudication.
+  Margin analysis then showed all 9 were over budget ONLY under verify's
+  block-level accounting (len(block)//4, which adds separator newlines and
+  loses per-card floor discounts: +27..+75 tokens) while UNDER or AT budget
+  under the runner's enforced accounting (per-card sum of floored
+  estimates, select_cards' actual contract: margins +0..-43). The run was
+  compliant; the instrument mis-measured. Fix: verify now sums
+  per-card `count_tokens(line)` — the exact accounting select_cards
+  enforces — with a joined-rounding regression test. verify on
+  annotator-full.db now exits 0. **Correction to the earlier claim in this
+  log: the full run did NOT exceed its card budget; budget enforcement
+  worked. The card-budget "restart blocker" is withdrawn.**
 - Outcome: 50/50 audited, verdicts in chunk reports
   (data/adjudication/adjudicate-20260913T005301/chunk-*.md).
 
@@ -98,7 +100,7 @@ slot — author-confirmed), cultural customs (smiling — two independent
 scenes), unnamed-but-active characters (tanned human — drives a stealth
 sequence), gear with mechanical effects (hide boots — footstep muffling).
 
-## Phase 4 — report (PARTIAL per blocker; findings complete, gate unresolved)
+## Phase 4 — report (COMPLETE)
 
 **Shadow-flag precision: 9/50 = 18% texture.** The "~half of flagged are
 valid" calibration does NOT hold on a stratified sample — 82% of flagged
@@ -145,23 +147,25 @@ tail. 53% flag rate ≠ 53% junk; the true texture share is ~18% of flagged
 target the specific texture classes (ordinary food, unnamed extras,
 one-beat scenery) rather than tightening admission broadly — the recall
 wins are real and survived audit; (b) the demote_queue holds 9 proposals
-for Matt; (c) the pre-existing card-budget violations, not entry quality,
-are the full run's demonstrated defect — fix budget enforcement before
-restart.
+for Matt; (c) budget enforcement is NOT a restart concern — the flagged
+over-budget batches were a verify-side accounting artifact (see Phase 3),
+fixed, with the run compliant under the enforced accounting.
 
 ## Evidence (merge bar)
 
 - Phase 1: 202 passed, ruff clean — commit d176dc6.
 - Phase 2 (+sampler fix): 221 passed, ruff clean — commits efae62c,
   98370a5.
-- Phase 3: pass exit 0; verify exit 1 PRE-EXISTING (backup reproduces
-  identically; table diff shows only 9 demote_queue inserts).
+- Phase 3: pass exit 0; verify exit 0 after fixing the checker's
+  block-level accounting bug (regression test added); table diff shows
+  only 9 demote_queue inserts.
 
 ## Open questions
 
 - Does Matt accept the 9 demotion proposals? (demote_queue, all pending)
-- Card-budget violations in the full run: instrument or fix the 15%
-  enforcement before restart — this is now the strongest restart blocker.
+- ~~Card-budget violations~~ RESOLVED: checker accounting bug, fixed
+  (verify now mirrors select_cards' per-card accounting); the full run was
+  budget-compliant all along.
 - Borderline-kept 4 (slavery, dark elf, timid girl, oud): Matt spot-check?
 - Full-candidate audit (all 239) costs ~14 weekly points (linear from the
   measured 3-per-50) if Matt wants the full precision number — feasible

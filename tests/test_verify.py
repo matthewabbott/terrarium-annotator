@@ -124,6 +124,36 @@ class TestSeededViolations:
 
         assert "budget-compliance" in self.checks(violations_for(run_output, seed))
 
+    def test_card_block_joined_rounding_not_flagged(self, run_output):
+        """Regression: block-level len//4 adds separators and loses per-card
+        floor discounts — a compliant batch must not be flagged. 10 cards x
+        15 chars: runner accounting 10x3=30 <= 35 budget; naive block
+        measure 159//4=39 > 35."""
+
+        def seed(conn):
+            cfg = json.loads(
+                conn.execute(
+                    "SELECT value FROM run_meta WHERE key = 'config'"
+                ).fetchone()[0]
+            )
+            cfg["context_tokens"] = 70
+            cfg["card_budget_fraction"] = 0.5  # card budget = 35 tokens
+            conn.execute(
+                "UPDATE run_meta SET value = ? WHERE key = 'config'",
+                (json.dumps(cfg),),
+            )
+            line = "a" * 10 + ": " + "b" * 3  # 15 chars -> 3 tokens per card
+            block = "\n".join([line] * 10)
+            content = (
+                "<story_so_far>\n\n</story_so_far>\n"
+                f"<known_glossary>\n{block}\n</known_glossary>"
+            )
+            conn.execute(
+                "UPDATE transcript SET content = ? WHERE role = 'user'", (content,)
+            )
+
+        assert "budget-compliance" not in self.checks(violations_for(run_output, seed))
+
     def test_cli_reports_violations_exit_1(self, run_output, capsys):
         corpus_path, conn = run_output
         conn.execute("DELETE FROM entry_source")

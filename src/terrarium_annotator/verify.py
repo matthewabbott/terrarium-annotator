@@ -199,9 +199,21 @@ def check_budget_compliance(
                 )
             )
         cards = content.split("<known_glossary>")[1].split("</known_glossary>")[0]
-        if count_tokens(cards) > card_budget:
+        # Same accounting select_cards enforces: per-card floored estimate
+        # of the exact injected line (term: gloss), no separators. Block-
+        # level len//4 adds separator newlines and loses per-card floor
+        # discounts, false-flagging compliant batches (measured 2026-09-13:
+        # 9 full-run batches +27..+75 over at block level, all <=0 under
+        # the enforced accounting).
+        card_tokens = sum(
+            count_tokens(line) for line in cards.strip().splitlines() if line.strip()
+        )
+        if card_tokens > card_budget:
             out.append(
-                Violation("budget-compliance", f"{where}: card block over token budget")
+                Violation(
+                    "budget-compliance",
+                    f"{where}: card block {card_tokens} tokens > {card_budget}",
+                )
             )
     return out
 
