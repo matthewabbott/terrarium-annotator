@@ -8,16 +8,159 @@ findings to the t1–40 baseline insights. Spec: the /goal prompt (Matt,
 
 ## Phase 1 — circuit breaker
 
-_Pending._
+## Phase 1 — circuit breaker (COMPLETE, commit d176dc6)
 
-## Phase 2 — adjudication mechanics
+- `quota.py`: `probe_weekly_fraction()` (omp usage --json, 7d usedFraction;
+  every failure mode raises QuotaProbeError — headroom never assumed) and
+  `make_quota_breaker(threshold)` raising QuotaExceeded at/over threshold.
+- Runner: check before each batch; halt leaves run_state at the next
+  unprocessed batch → resume re-attempts it (tested). Researcher: check at
+  session start + each round (tested: 0 calls on start-halt, exactly 1
+  round on mid-round halt).
+- CLI: `--quota-breaker` on run/research (default 0.50, <=0 disables);
+  halt exits 3 with labeled message; `quota_check_factory` injectable so
+  tests never touch the real probe.
+- Researcher also gained `allowed`/`system_prompt`/`overview` params
+  (defaults unchanged — Phase 2 needs them).
+- 14 L0 tests; merge bar 202 passed, ruff clean.
 
-_Pending._
+## Phase 2 — adjudication mechanics (COMPLETE, commits efae62c, 98370a5)
 
-## Phase 3 — the pass
+- `demote_queue` table mirrors merge_queue (pending/accepted/rejected) —
+  entry.status has no graveyard value (CHECK constraint) and migrating
+  annotator-full.db was not authorized, so demotions are PROPOSED, human-
+  applied. `GlossaryStore.propose_demotion` requires rationale + verbatim
+  quote mentioning the term (same gate pattern as propose_merge).
+- `ADJUDICATION_TOOLS`: fetch_entry/fetch_post/fetch_thread_range/
+  recall_story/search_glossary/search_corpus + propose_demotion ONLY.
+  Dispatcher rejection of every forbidden write (propose_entry,
+  update_entry, add_alias, rename_entry, propose_merge, confirm_entry)
+  is tested, plus positive dispatch of all allowed tools.
+- Dedicated `adjudicate` subcommand hard-wires the allowlist; stock
+  `research` keeps RESEARCHER_TOOLS and was not used. A byte-verified
+  backup (`backup_db`, filecmp) is enforced before the writable DB opens;
+  backup failure refuses the run (exit 2). Backup taken:
+  `data/backups/annotator-full-20260913T002456.db`.
+- Sampler: thread-first deterministic round-robin with unseen-class
+  preference and middle-out fallback. NEEDED A FIX mid-phase: class-only
+  allocation degenerated because the population's tags are freeform (65
+  distinct "classes" over 239 rows — singleton strata starved thread
+  coverage: 21/25 threads, first 8 picks all thread 30265887). Fixed
+  version: 25/25 threads, 39 classes, no first-N degeneracy (tested).
+- 17+2 L0 tests; merge bar 221 passed, ruff clean.
 
-_Pending._
+### Sampling frame (recorded per goal)
 
-## Phase 4 — report
+- Population: 239 deferred_candidate rows in annotator-full.db, all
+  matched to live entries (0 unmatched).
+- Population classes are noisy freeform tags (top: item 18, academy 16,
+  Anthus 14, Licae ruins 14, anthus 12, character 11 — tag-vocabulary
+  discipline is itself a finding, see Phase 4).
+- Sample: 50 candidates, all 25 flagged threads, 39 tag classes,
+  deterministic (re-runnable via load_flagged_candidates +
+  stratified_sample at size 50). Persisted:
+  `data/adjudication/adjudicate-20260913T005301/sample.json`.
 
-_Pending._
+## Phase 3 — the pass (RAN CLEAN; VERIFY GATE UNMET — pre-existing violations)
+
+- 5 chunk sessions (12/12/12/12/2), Kimi k2.5, ADJUDICATION_TOOLS,
+  quota breaker active (0.50; usage moved 6% → 9% for the whole pass).
+  Runtime 10m15s. Zero failed calls, zero retries, zero halts.
+- **Writes proven clean**: table diff vs backup — entry/revision/
+  entry_source/story_log/deferred_candidate/merge_queue IDENTICAL;
+  only delta = 9 demote_queue inserts (all pending, human queue).
+- **BLOCKER (verbatim gate unmet)**: `verify` on annotator-full.db exits 1
+  with 9 budget-compliance violations ("card block over token budget",
+  threads 30936089/31283673/31323984/31411898). The PRE-PASS BACKUP
+  reproduces the identical 9 violations → they are historical artifacts of
+  the full run's growing card blocks, NOT adjudication damage. They cannot
+  be fixed without rewriting historical run data (forbidden). Gate intent
+  (pass did not corrupt provenance) is established by the backup
+  comparison; the literal exit-0 criterion is unachievable and reported
+  here per the stop-condition rule, NOT silently waived. **These
+  violations are themselves a finding**: the relaxed-prompt run exceeded
+  its own 15% card budget in at least 8 batches — budget enforcement
+  needs attention before any restart.
+- Outcome: 50/50 audited, verdicts in chunk reports
+  (data/adjudication/adjudicate-20260913T005301/chunk-*.md).
+
+### Verdicts (from chunk reports + demote_queue)
+
+TEXTURE (9 filed, queue ids 1–9): guar jerky, garum, fatback (ordinary
+foodstuffs); grandson, librarian, school nurse (unnamed one-scene or
+off-page extras); monkeys (one-scene fauna); chandelier (unnamed fixture);
+magical contamination (hazard the narrator invents then negates on-page).
+
+VALID (41): includes borderline-kept per the doubt rule: slavery (single
+inference), dark elf (crowd phrasing), timid girl, oud. Confirmed-strong
+classes: named districts (port, lower quarters), mechanics (magical item
+slot — author-confirmed), cultural customs (smiling — two independent
+scenes), unnamed-but-active characters (tanned human — drives a stealth
+sequence), gear with mechanical effects (hide boots — footstep muffling).
+
+## Phase 4 — report (PARTIAL per blocker; findings complete, gate unresolved)
+
+**Shadow-flag precision: 9/50 = 18% texture.** The "~half of flagged are
+valid" calibration does NOT hold on a stratified sample — 82% of flagged
+candidates are valid referents with corpus-confirmed story weight. The
+calibration was non-stratified (early-thread heavy); the stratified pass
+revises it decisively downward for texture share. Caveat: the adjudicator
+ran with an explicit keep-bias ("borderline = VALID"), which is the right
+posture for precision measurement but means 18% is a floor estimate only
+if one disputes borderline calls (4 noted).
+
+**Over-admission concentrates in identifiable classes**: ordinary
+foodstuffs named by real-world terms, unnamed one-scene/off-page extras,
+one-beat background fauna/fixtures. Everything mechanical, institutional,
+nominative, or plot-causal survived audit — including classes the t1–40
+baseline missed entirely (books/documents: all VALID; taxonomy terms:
+VALID).
+
+**Tag vocabulary is undisciplined**: 65 freeform tag values over 239
+flagged rows (academy/Anthus/Licae ruins/anthus as "classes"). The tag
+priors mechanism assumes a controlled vocabulary; the relaxed prompt
+apparently doesn't enforce one. Next prompt revision should pin the tag
+list.
+
+**Gloss style**: chunk reports show quote-faithful verdicts; the earlier
+style concerns ((q.v.) cross-refs, ALL-CAPS bookkeeping) didn't impede
+auditing — the (q.v.) style reads as genuinely wiki-useful. No new style
+evidence either way from this pass.
+
+**Cost (telemetry, run adjudicate-20260913T005301)**: 22 calls, 0 errors,
+0 retries (attempts 22/22 success — no retry tax this pass), 93 tool
+calls, 855k chars in / 21.5k chars out (est ~214k/~5.4k tokens).
+Per audited candidate: ~17.1k chars in, ~1.9 tool calls, ~12.3s wall.
+Weekly quota delta for the full 50-candidate pass: ~3 points (6% → 9%).
+At this rate, auditing ALL 239 flagged candidates costs ~9–10 weekly
+points — cheap. Provider usage fields: none emitted by omp (records all
+provider_usage=0, consistent with the Q1 UNKNOWN verdict).
+
+**Verdict on the open hypothesis**: the full run's permissiveness vs the
+baseline is MOSTLY a distribution artifact, with a small real texture
+tail. 53% flag rate ≠ 53% junk; the true texture share is ~18% of flagged
+(≈10% of all 455 entries). Implications: (a) next prompt revision should
+target the specific texture classes (ordinary food, unnamed extras,
+one-beat scenery) rather than tightening admission broadly — the recall
+wins are real and survived audit; (b) the demote_queue holds 9 proposals
+for Matt; (c) the pre-existing card-budget violations, not entry quality,
+are the full run's demonstrated defect — fix budget enforcement before
+restart.
+
+## Evidence (merge bar)
+
+- Phase 1: 202 passed, ruff clean — commit d176dc6.
+- Phase 2 (+sampler fix): 221 passed, ruff clean — commits efae62c,
+  98370a5.
+- Phase 3: pass exit 0; verify exit 1 PRE-EXISTING (backup reproduces
+  identically; table diff shows only 9 demote_queue inserts).
+
+## Open questions
+
+- Does Matt accept the 9 demotion proposals? (demote_queue, all pending)
+- Card-budget violations in the full run: instrument or fix the 15%
+  enforcement before restart — this is now the strongest restart blocker.
+- Borderline-kept 4 (slavery, dark elf, timid girl, oud): Matt spot-check?
+- Full-candidate audit (all 239) is affordable (~9–10 weekly points) if
+  Matt wants the full precision number.
+
