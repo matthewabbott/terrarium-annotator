@@ -111,6 +111,30 @@ ran with an explicit keep-bias ("borderline = VALID"), which is the right
 posture for precision measurement but means 18% is a floor estimate only
 if one disputes borderline calls (4 noted).
 
+**Precision by class** (n = sample size; texture = demotion filed):
+computed from sample.json + demote_queue. Singleton rows (n=1, all VALID
+unless noted) are collapsed after the classes with n>1 or texture>0.
+
+| class | n | texture | valid |
+|---|---|---|---|
+| academy | 5 | 1 | 4 |
+| Anthus | 5 | 3 | 2 |
+| anthus | 3 | 1 | 2 |
+| Licae | 2 | 0 | 2 |
+| food | 1 | 1 | 0 |
+| concept | 1 | 1 | 0 |
+| device | 1 | 1 | 0 |
+| fauna | 1 | 1 | 0 |
+| 31 singleton classes | 31 | 0 | 31 |
+| **TOTAL** | **50** | **9** | **41** |
+
+Reading: texture concentrates in Anthus/anthus-tagged rows (4/8 — the
+Anthus chapters are where scenery got admitted: chandelier, monkeys,
+librarian, garum) plus singleton food/concept/device/fauna rows. The
+Anthus/anthus split is itself tag-vocabulary noise (same class, two
+capitalizations). Every mechanic/magic/faction/institution/metamagic
+class: 0 texture.
+
 **Over-admission concentrates in identifiable classes**: ordinary
 foodstuffs named by real-world terms, unnamed one-scene/off-page extras,
 one-beat background fauna/fixtures. Everything mechanical, institutional,
