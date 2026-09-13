@@ -111,6 +111,28 @@ class TestSampler:
         sample = stratified_sample(self.make_candidates(specs), 5)
         assert any(c.tags == ("character",) for c in sample)
 
+    def test_every_thread_covered(self):
+        # 25 threads x 8 candidates, 3 classes interleaved; size 50.
+        classes = [("mechanic",), ("character",), ()]
+        specs = [
+            (f"t{t}_c{i}", 100 + t, classes[(t + i) % 3])
+            for t in range(25)
+            for i in range(8)
+        ]
+        sample = stratified_sample(self.make_candidates(specs), 50)
+        assert {c.thread_id for c in sample} == {100 + t for t in range(25)}
+
+    def test_not_first_n_when_skewed(self):
+        # Thread 100 all mechanics, thread 101 all characters: first-N
+        # would take [0..5] from thread 100; round-robin must interleave.
+        specs = [(f"m{i}", 100, ("mechanic",)) for i in range(10)] + [
+            (f"c{i}", 101, ("character",)) for i in range(10)
+        ]
+        sample = stratified_sample(self.make_candidates(specs), 6)
+        ids = [c.candidate_id for c in sample]
+        assert ids != list(range(6))
+        assert {c.thread_id for c in sample} == {100, 101}
+
 
 class TestCandidateLoading:
     def test_joins_entries_aliases_and_tags(self, env):

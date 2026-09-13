@@ -128,46 +128,49 @@ def _stratum_key(c: Candidate) -> str:
 
 
 def stratified_sample(candidates: list[Candidate], size: int) -> list[Candidate]:
-    """Proportional-by-class allocation (largest remainder, min 1 per
-    class), evenly spaced over (thread, id) within each class — covers
-    classes AND threads; deterministic, never first-N, never random."""
-    strata: dict[str, list[Candidate]] = {}
+    """Thread-first stratification: round-robin over threads (every thread
+    with flagged candidates is covered when size >= #threads), preferring
+    unseen classes within each thread so class diversity survives small
+    samples. Deterministic — never first-N, never random.
+
+    Why thread-first: the population's tags are freeform (60+ distinct
+    values over 239 rows), so class-proportional allocation degenerates
+    into singleton strata and can starve whole threads. Thread coverage is
+    the harder requirement (per-class precision needs every era of the
+    run represented); class spread is the within-thread tiebreak."""
+    size = min(size, len(candidates))
+    by_thread: dict[int, list[Candidate]] = {}
     for c in candidates:
-        strata.setdefault(_stratum_key(c), []).append(c)
-    for members in strata.values():
-        members.sort(key=lambda c: (c.thread_id or 0, c.candidate_id))
+        by_thread.setdefault(c.thread_id or 0, []).append(c)
+    for members in by_thread.values():
+        members.sort(key=lambda c: c.candidate_id)
 
-    total = len(candidates)
-    size = min(size, total)
-    # Largest-remainder proportional allocation, min 1 per stratum.
-    quotas = {k: max(1, size * len(m) / total) for k, m in strata.items()}
-    floors = {k: min(int(q), len(strata[k])) for k, q in quotas.items()}
-    remainder = size - sum(floors.values())
-    by_frac = sorted(
-        quotas,
-        key=lambda k: (quotas[k] - floors[k], len(strata[k])),
-        reverse=True,
-    )
-    alloc = dict(floors)
-    for k in by_frac:
-        if remainder <= 0:
+    seen_classes: set[str] = set()
+    picked: list[Candidate] = []
+    while len(picked) < size:
+        progress = False
+        for thread in sorted(by_thread):
+            if len(picked) >= size:
+                break
+            members = by_thread[thread]
+            if not members:
+                continue
+            # Prefer the first member whose class is still unseen;
+            # otherwise the MIDDLE of the remaining list — sequential
+            # front-picking degenerates to first-N on thread-ordered ids,
+            # which the sampling contract forbids.
+            choice = next(
+                (c for c in members if _stratum_key(c) not in seen_classes),
+                members[len(members) // 2],
+            )
+            members.remove(choice)
+            seen_classes.add(_stratum_key(choice))
+            picked.append(choice)
+            progress = True
+        if not progress:
             break
-        if alloc[k] < len(strata[k]):
-            alloc[k] += 1
-            remainder -= 1
-
-    sample: list[Candidate] = []
-    for key in sorted(strata):
-        members = strata[key]
-        n = alloc[key]
-        if n >= len(members):
-            sample.extend(members)
-            continue
-        # Evenly spaced indices over the (thread, id)-sorted members.
-        step = len(members) / n
-        sample.extend(members[int(i * step)] for i in range(n))
-    sample.sort(key=lambda c: c.candidate_id)
-    return sample
+    picked.sort(key=lambda c: c.candidate_id)
+    return picked
 
 
 def chunk_candidates(sample: list[Candidate], chunk_size: int) -> list[list[Candidate]]:
