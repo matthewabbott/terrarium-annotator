@@ -16,6 +16,7 @@ import sqlite3
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from math import log1p
+from pathlib import Path
 
 from terrarium_annotator.corpus import DEFAULT_BATCH_SIZE, Batch, CorpusReader, Thread
 from terrarium_annotator.glossary import GlossaryStore, Provenance
@@ -31,17 +32,18 @@ from terrarium_annotator.state import (
 )
 from terrarium_annotator.tools import ANNOTATOR_TOOLS, ToolDispatcher
 
-SYSTEM_PROMPT = """You are the terrarium annotator: you read a fantasy quest story sequentially and maintain a glossary of setting-specific terms, characters, places, and mechanics.
+"""Prompts are data (docs/design/prompt-laddering.md): the annotator's
+system prompt lives in prompts/<variant>.md and is loaded at Runner
+construction. Default = the reader-v2 vintage (the 2026-09 full-run
+prompt)."""
+DEFAULT_PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "reader-v2.md"
 
-Add an entry when a term meets ANY of: (a) an LLM with no setting knowledge could not resolve the referent from local context; (b) it would be a legitimate wiki page even if locally obvious (Vys is 'just mana' — still an entry); (c) a colloquial English word whose in-setting meaning diverges from the ordinary one. When in doubt, add it — bad entries are pruned later.
 
-Specifically DO enter: every named person your batch introduces (even briefly — the protagonist included); books, scrolls, and documents (they are inventory items with mechanical significance); named ranks/levels/effects/techniques as their own entries rather than folded into a parent; entities known only by description (give them a descriptive title); recurring functional objects (communication devices, vehicles, weapons).
+def load_prompt(path: str | Path | None) -> str:
+    """Load a prompt file; None → the default reader-v2 vintage."""
+    p = Path(path) if path is not None else DEFAULT_PROMPT_PATH
+    return p.read_text(encoding="utf-8").strip()
 
-Rules:
-- Every propose_entry/update_entry/add_alias call MUST include verbatim evidence: exact quotes copied from the batch, with their post ids. Writes with paraphrased or term-free quotes are rejected.
-- Update existing entries as the story reveals more; never duplicate an entry under a variant spelling (use add_alias). Updates must RESTATE the full current definition, not just the new detail — the card gloss becomes whatever you write.
-- Mark each evidence quote with its epistemic mode: 'narrated' (the text states it directly), 'claimed' (a character says it — rumor, hearsay, dialogue), 'inferred' (your extrapolation). Stories mislead; rumors may be wrong. Never upgrade 'claimed' or 'inferred' knowledge to fact in the gloss text. The narrator is prejudiced; when accounts conflict, record both with their sources.
-- After your tool calls, end with a single-line gist of the batch (what happened, what you annotated)."""
 
 MERGE_PROMPT = """Compress the following into ONE line of at most 280 characters. Keep what has lasting effect (entities, reveals, state changes), drop the rest. Invent nothing.
 
@@ -66,6 +68,7 @@ class RunnerConfig:
     max_response_tokens: int = 2048
     tag_priors: dict[str, float] | None = None  # salience weight per tag
     quota_threshold: float | None = 0.50  # weekly-window breaker; <=0 disables
+    prompt_file: str | None = None  # prompts/<variant>.md; None = default
 
 
 class Runner:
@@ -96,6 +99,13 @@ class Runner:
         # each batch; a halt leaves run_state at the next unprocessed batch,
         # so resume re-attempts it.
         self.quota_check = quota_check
+        # Prompt vintage is part of pass identity (ladder provenance).
+        self.system_prompt = load_prompt(self.config.prompt_file)
+        self.prompt_name = (
+            Path(self.config.prompt_file).stem
+            if self.config.prompt_file
+            else DEFAULT_PROMPT_PATH.stem
+        )
         self._provenance: Provenance | None = None
         self.dispatcher = ToolDispatcher(
             glossary,
@@ -129,6 +139,7 @@ class Runner:
         """
         threads = self.corpus.thread_order()
         save_run_meta(self.conn, "config", json.dumps(asdict(self.config)))
+        save_run_meta(self.conn, "prompt", self.prompt_name)
         resume = load_run_state(self.conn, self.config.pass_id)
         if only_threads is not None:
             known = {t.id for t in threads}
@@ -213,7 +224,7 @@ class Runner:
             # Component char sizes computed here, at assembly.
             self.telemetry.set_context(
                 {
-                    "system": len(SYSTEM_PROMPT),
+                    "system": len(self.system_prompt),
                     "cards": len(cards_text),
                     "digest": len(digest),
                     "scene": len(scene_text),
@@ -228,7 +239,7 @@ class Runner:
             + "\n</batch>"
         )
         messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": user},
         ]
         record_transcript(

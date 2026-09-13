@@ -33,7 +33,7 @@ from terrarium_annotator.quota import (
     make_quota_breaker,
 )
 from terrarium_annotator.runner import Runner, RunnerConfig
-from terrarium_annotator.state import connect_annotator_db
+from terrarium_annotator.state import connect_annotator_db, save_run_meta
 from terrarium_annotator.tools import ToolDispatcher
 from terrarium_annotator.verify import verify
 
@@ -80,6 +80,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=0.50,
         help="Halt when 7-day Kimi quota usedFraction reaches this "
         "(default 0.50; <=0 disables)",
+    )
+    run.add_argument(
+        "--prompt",
+        default=None,
+        help="Prompt file (default: prompts/reader-v2.md)",
     )
 
     chat = sub.add_parser(
@@ -202,10 +207,15 @@ def run_pass(
         glossary,
         client,
         conn,
-        RunnerConfig(pass_id=args.pass_id, quota_threshold=args.quota_breaker),
+        RunnerConfig(
+            pass_id=args.pass_id,
+            quota_threshold=args.quota_breaker,
+            prompt_file=args.prompt,
+        ),
         telemetry=instrumented,
         quota_check=quota_check_factory(args.quota_breaker),
     )
+    save_run_meta(conn, "model", args.model)
     runner.run(max_batches=args.max_batches, only_threads=args.threads)
     return 0
 
