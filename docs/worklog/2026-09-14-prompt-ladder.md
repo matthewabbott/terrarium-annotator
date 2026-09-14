@@ -30,7 +30,8 @@ gold-coverage scoping contract (denominator = processed threads' pages).
 
 - ladder.py scorecard: slice-scoped gold coverage (page N = Nth
   chronological thread — verified against corpus titles + label presence
-  on pages 3/4/5 BEFORE any live run), flag rate, pair candidates,
+  on pages 3/4/5 BEFORE any live run), flag rate, token-subset pair
+  candidates (heuristic proxy),
   telemetry cost, est tokens per covered entity (N/A on zero coverage).
 - CLI ladder-score. 9 L0 tests; 237 passed.
 
