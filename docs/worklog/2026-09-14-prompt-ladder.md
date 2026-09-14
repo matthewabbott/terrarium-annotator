@@ -35,7 +35,7 @@ gold-coverage scoping contract (denominator = processed threads' pages).
   telemetry cost, est tokens per covered entity (N/A on zero coverage).
 - CLI ladder-score. 9 L0 tests; 237 passed.
 
-## Phase 3 — ladder runs
+## Phase 3 — ladder runs (three arms attempted, two complete)
 
 ### Budget policy (recorded before any live run; advisory-driven)
 
@@ -105,19 +105,24 @@ territory.)
 
 ### Findings
 
-1. **v3's audit test did NOT restrain admission** — 166 entries vs v1's
-   75; 539/1k posts. The pinned tag vocabulary also failed silently:
-   v3 produced duplicate fragment pairs ("magic"/"magic tomes",
-   "metamagic"/"metamagic instruction: blast" ×3). Prose self-checks do
-   not bind at write time.
+1. **v3 showed no admission restraint in this run** — 166 entries vs
+   v1's 75; 539/1k posts, and fragment pair candidates appeared despite
+   the pinned tag vocabulary ("magic"/"magic tomes", "metamagic"/
+   "metamagic instruction: blast" ×3). Caveat: density alone does not
+   prove the audit test had zero effect (no unrestrained-v3
+   counterfactual was run); what the data DOES show is that whatever
+   restraint it produced still left admission far above v1, and tag
+   discipline did not materialize. Mechanical gating, not prose, is the
+   candidate fix.
 2. **v1 is the cost-efficiency leader on exact-surface scoring** (88k
    tokens/covered vs 191k) with near-equal exact-surface coverage and half
    v3's flag rate. What v1/v3's flag rates mean for TEXTURE share is
    UNKNOWN: the adjudication 18% figure was measured on the full-run (v2)
    flag population and must not be multiplied onto different populations.
    A v1/v3 adjudication pass is the pending audit.
-3. **v2-partial** tracked v3's shape (density between v1 and v3, flag
-   rate 51% consistent with the full run's 53%) — consistent, no surprise.
+3. **v2-partial** ran denser than v1 and sparser than v3, flag rate 51%
+   — a descriptive similarity to the full run's 53% on a partial slice;
+   NOT harness validation (different slice coverage, invalid arm).
 4. Retry tax was small but real on all arms (5/6/2 error attempts);
    telemetry captured it per-arm.
 
