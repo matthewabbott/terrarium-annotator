@@ -47,6 +47,12 @@ judge. Policy:
   before holdout; ≥ 0.55 before judge. An arm stopped by quota is INVALID,
   reported as such — never partially scored.
 - Every arm runs with --quota-breaker 0.60 as the hard backstop.
+- Pre-v2 launch (at 45%): no staged gate was declared for v2 — decision
+  was backstop-only (0.60), on the evidence that v2-conditions on
+  threads 1–5 cost ~37k chars/batch early (full-run transcript data) and
+  the arm was goal-required for winner selection. Recorded post-hoc for
+  policy completeness; in the event the breaker fired and the arm was
+  classified invalid.
 
 
 All arms: threads 1–5 (30265887…30459080), kimi-k2.5, --quota-breaker

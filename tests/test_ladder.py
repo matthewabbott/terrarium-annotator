@@ -14,11 +14,11 @@ from test_runner import build_corpus  # tests-dir sibling
 from terrarium_annotator.corpus import CorpusReader
 from terrarium_annotator.glossary import Evidence, GlossaryStore, Provenance
 from terrarium_annotator.ladder import (
-    duplicate_pairs,
     format_scorecard,
     gold_pairs_for_pages,
     scorecard,
     surface_coverage,
+    token_subset_pair_candidates,
 )
 from terrarium_annotator.state import connect_annotator_db
 
@@ -169,7 +169,7 @@ class TestScorecard:
         sc = scorecard(conn, corpus, GOLD, [101])
         assert sc["flagged"] == 1 and sc["flag_rate"] == 1.0
 
-    def test_duplicate_pairs_detected(self, tmp_path):
+    def test_token_subset_pair_candidates_detected(self, tmp_path):
         corpus_path = tmp_path / "corpus.db"
         build_corpus(corpus_path)
         corpus = CorpusReader(corpus_path)
@@ -187,7 +187,7 @@ class TestScorecard:
             " 'The reserve.', 't', 'now', 'now')"
         )
         conn.commit()
-        assert duplicate_pairs(conn) == [("vys", "vys pool")]
+        assert token_subset_pair_candidates(conn) == [("vys", "vys pool")]
 
     def test_format_renders(self, variant_db):
         corpus_path, conn, _ = variant_db

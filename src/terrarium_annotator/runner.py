@@ -32,17 +32,23 @@ from terrarium_annotator.state import (
 )
 from terrarium_annotator.tools import ANNOTATOR_TOOLS, ToolDispatcher
 
-"""Prompts are data (docs/design/prompt-laddering.md): the annotator's
-system prompt lives in prompts/<variant>.md and is loaded at Runner
-construction. Default = the reader-v2 vintage (the 2026-09 full-run
-prompt)."""
+# Prompts are data (docs/design/prompt-laddering.md): the annotator's
+# system prompt lives in prompts/<variant>.md and is loaded at Runner
+# construction. Default = the reader-v2 vintage (the 2026-09 full-run
+# prompt).
 DEFAULT_PROMPT_PATH = Path(__file__).resolve().parents[2] / "prompts" / "reader-v2.md"
 
 
 def load_prompt(path: str | Path | None) -> str:
-    """Load a prompt file; None → the default reader-v2 vintage."""
+    """Load a prompt file; None → the default reader-v2 vintage. Leading
+    and trailing whitespace is stripped (the historical in-code constant
+    had none, so this preserves byte-identity with it); empty files are
+    rejected."""
     p = Path(path) if path is not None else DEFAULT_PROMPT_PATH
-    return p.read_text(encoding="utf-8").strip()
+    text = p.read_text(encoding="utf-8").strip()
+    if not text:
+        raise ValueError(f"prompt file is empty: {p}")
+    return text
 
 
 MERGE_PROMPT = """Compress the following into ONE line of at most 280 characters. Keep what has lasting effect (entities, reveals, state changes), drop the rest. Invent nothing.

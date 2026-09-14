@@ -64,9 +64,11 @@ def surface_coverage(
     return covered, missed
 
 
-def duplicate_pairs(conn: sqlite3.Connection) -> list[tuple[str, str]]:
-    """Diagnostic: entry pairs whose normalized terms share a token subset
-    (Aleamond-class fragments). Heuristic — review, never auto-merge."""
+def token_subset_pair_candidates(conn: sqlite3.Connection) -> list[tuple[str, str]]:
+    """HEURISTIC PROXY, not a duplicate count: entry pairs whose normalized
+    terms share a token subset (Aleamond-class fragments). Counts legitimate
+    related terms too (e.g. "vys" / "vys pool"). Diagnostic for human
+    review — never part of winner selection, never auto-merge."""
     terms = [
         (r[0], set(r[0].split()))
         for r in conn.execute("SELECT term_normalized FROM entry")
@@ -134,7 +136,7 @@ def scorecard(
         "gold_covered": len(covered),
         "gold_coverage": round(len(covered) / len(in_scope), 3) if in_scope else None,
         "gold_missed": [f"{ns}:{slug}" for ns, slug in missed],
-        "duplicate_pairs": duplicate_pairs(conn),
+        "token_subset_pair_candidates": token_subset_pair_candidates(conn),
         "cost": cost,
         # Headline: N/A when coverage is zero — never divide by zero.
         "est_tokens_per_covered_entity": (
@@ -161,8 +163,11 @@ def format_scorecard(name: str, sc: dict) -> str:
             f"attempts={c['attempts']} "
             f"tokens/covered={sc['est_tokens_per_covered_entity']}"
         )
-    if sc["duplicate_pairs"]:
-        lines.append(f"  duplicate pairs: {sc['duplicate_pairs']}")
+    if sc["token_subset_pair_candidates"]:
+        lines.append(
+            f"  token-subset pair candidates (heuristic): "
+            f"{sc['token_subset_pair_candidates']}"
+        )
     if sc["gold_missed"]:
         lines.append(f"  missed gold: {', '.join(sc['gold_missed'])}")
     return "\n".join(lines)

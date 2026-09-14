@@ -45,6 +45,23 @@ class TestPromptLoading:
         assert runner.system_prompt == "VARIANT MARKER prompt"
         assert runner.prompt_name == "variant"
 
+    def test_custom_prompt_reaches_llm_request(self, tmp_path):
+        corpus_path = tmp_path / "corpus.db"
+        build_corpus(corpus_path)
+        p = tmp_path / "variant.md"
+        p.write_text("VARIANT MARKER prompt")
+        model = ScriptedModel([ChatResponse(content="gist")])
+        runner, _ = make_runner(
+            corpus_path,
+            tmp_path / "annotator.db",
+            model,
+            prompt_file=str(p),
+        )
+        runner.run(max_batches=1, only_threads=[101])
+        system = model.requests[0]["messages"][0]
+        assert system["role"] == "system"
+        assert system["content"] == "VARIANT MARKER prompt"
+
 
 class TestProvenance:
     def test_run_meta_records_prompt_and_model(self, tmp_path):

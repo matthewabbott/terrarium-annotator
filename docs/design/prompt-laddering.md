@@ -40,7 +40,7 @@ or specialists.
 
 Early-quest narration is in-character DEFICIENT — the protagonist learns
 metaphysics/history progressively, and early accounts are wrong in the way
-"you can't subtract a larger number from a larger one" is wrong. Any
+"you can't subtract a larger number from a smaller one" is wrong. Any
 second-read (NG+) agent must NOT treat early-quest info as gospel: every
 claim carries in-story provenance (who claimed it, when, epistemic mode),
 and later corrections are recorded as conflicting accounts with per-source
