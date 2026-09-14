@@ -30,7 +30,7 @@ gold-coverage scoping contract (denominator = processed threads' pages).
 
 - ladder.py scorecard: slice-scoped gold coverage (page N = Nth
   chronological thread — verified against corpus titles + label presence
-  on pages 3/4/5 BEFORE any live run), flag rate, duplicate pairs,
+  on pages 3/4/5 BEFORE any live run), flag rate, pair candidates,
   telemetry cost, est tokens per covered entity (N/A on zero coverage).
 - CLI ladder-score. 9 L0 tests; 237 passed.
 
@@ -84,7 +84,7 @@ threads 17/22; gold pages 17–22 exist).
 | est tokens in | 1.77M | 4.40M | 2.77M (partial) |
 | tokens/covered entity | **88k** | 191k | 115k (partial) |
 | attempts err/success | 5/336 | 6/387 | 2/276 |
-| duplicate pairs | 5 | 17+ | 7 (partial) |
+| token-subset pair candidates (heuristic proxy, not a duplicate count) | 5 | 17+ | 7 (partial) |
 
 ### The alias-gap diagnostic (NOT a scored tier — hypothesis only)
 

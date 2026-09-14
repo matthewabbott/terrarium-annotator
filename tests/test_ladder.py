@@ -1,6 +1,6 @@
 """L0 tests for the ladder scorecard: gold scoping (only processed
 threads' pages), exact surface/alias coverage, N/A cost-per-entity on
-zero coverage, duplicate-pair diagnostics, cost aggregation from a
+zero coverage, pair-candidate diagnostics, cost aggregation from a
 telemetry JSONL. Fabricated DBs only.
 """
 
