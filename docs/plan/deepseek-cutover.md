@@ -44,17 +44,13 @@ Results (all against the live endpoint):
   (`TERRARIUM_BASE_URL`), per AGENTS.md config rules. Apply to run,
   research, adjudicate, AND chat. Provider selects OmpRpcClient vs
   OpenAICompatibleClient.
-- `OpenAICompatibleClient` payload gaps (block thinking-off variants):
-  it currently sends only messages/temperature/max_tokens/model/tools.
-  Add passthrough for `chat_template_kwargs` (the enable_thinking knob)
-  and `top_p`; both become ladder variant axes, so they must be
-  client-settable and recorded in run_meta.
-  verify its `parse_choice` handles the server's response shape (probe
-  from step 1).
-- CLI: `--base-url` / `--model` on run/research/adjudicate; env-sourced
-  defaults (`TERRARIUM_BASE_URL`), per AGENTS.md config rules. Provider
-  selection: `--provider kimi|local` choosing OmpRpcClient vs
-  OpenAICompatibleClient.
+- `OpenAICompatibleClient`: probe-verified — its `parse_choice` consumes
+  this server's response shape as-is. Payload gaps to close (they block
+  thinking-off variants): it currently sends only
+  messages/temperature/max_tokens/model/tools. Add passthrough for
+  `chat_template_kwargs` (the enable_thinking knob) and `top_p`; both
+  become ladder variant axes, so they must be client-settable and
+  recorded in run_meta.
 - `--context-tokens` flag (RunnerConfig field exists; CLI never exposed
   it) — card budget derives from it, so the served window MUST be set
   correctly or injection silently over/under-fills.
