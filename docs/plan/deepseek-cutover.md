@@ -39,7 +39,16 @@ Results (all against the live endpoint):
 
 ## Step 2 — wiring (small build, L0-tested)
 
-- `OpenAICompatibleClient` already exists and passes `tools=` natively;
+- CLI: `--base-url` + `--provider kimi|local` are NEW flags (model
+  selection already exists as `--model`); env-sourced default
+  (`TERRARIUM_BASE_URL`), per AGENTS.md config rules. Apply to run,
+  research, adjudicate, AND chat. Provider selects OmpRpcClient vs
+  OpenAICompatibleClient.
+- `OpenAICompatibleClient` payload gaps (block thinking-off variants):
+  it currently sends only messages/temperature/max_tokens/model/tools.
+  Add passthrough for `chat_template_kwargs` (the enable_thinking knob)
+  and `top_p`; both become ladder variant axes, so they must be
+  client-settable and recorded in run_meta.
   verify its `parse_choice` handles the server's response shape (probe
   from step 1).
 - CLI: `--base-url` / `--model` on run/research/adjudicate; env-sourced
@@ -58,15 +67,15 @@ Results (all against the live endpoint):
   replacement: wall-clock/tokens-per-hour budget from telemetry. Not
   required for cutover.
 
-## Step 3 — tool-convention decision (evidence from step 1)
+## Step 3 — tool-convention decision (RESOLVED 2026-09-14)
 
-Two candidate conventions: native `tools=` (if the server's parser is
-reliable) vs our text `<tool_call>` convention (model-agnostic, proven on
-kimi; needs the convention block injected — the OpenAI path currently
-relies on native tools only, so text-convention support there is new
-work: serialize TOOL_CONVENTION into the system prompt and parse
-`<tool_call>` blocks from content, mirroring omp_rpc.parse_response_text).
-Decide by probe reliability; native is less code IF reliable.
+Native `tools=`. Probe-verified on this deployment: one-shot tool call
+returned a proper `tool_calls` array (stringified JSON args,
+`finish_reason: "tool_calls"`), and a round-trip (assistant tool_call +
+`role: tool` result → final content) completed cleanly — see the worklog.
+The text `<tool_call>` convention is the documented fallback ONLY if
+ladder telemetry shows discipline slips (malformed/missed calls); building
+it is deferred until that evidence exists.
 
 ## Step 4 — ladder onboarding (the parity bar)
 
@@ -81,14 +90,32 @@ Decide by probe reliability; native is less code IF reliable.
 - Then tuned variants if needed (deepseek-friendly wording; text tool
   convention if native fails). Prompts stay short/contextual per the
   anti-Goodhart rule.
-- Cost column becomes tokens + wall-clock instead of quota points —
-  telemetry already records durations; tokens/s per batch is the new
-  efficiency axis.
+- **Parity bar is numeric**: DeepSeek arms report the SAME scorecard on
+  the SAME threads as the kimi arms — baselines: v1 20/52 exact gold
+  (243.5 entries/1k posts, flag rate 26.7%, 88k est tokens/covered), v3
+  23/52 (539/1k, 42.2%, 191k). Parity = exact-surface coverage within a
+  couple pairs of those, verify-clean, no tool-discipline retry spike.
+- Scorecard upgrade task (Step 2/4 boundary): ladder.py aggregates only
+  chars/4 ESTIMATES today; telemetry records carry real provider `usage`
+  on this path. Make the scorecard prefer provider tokens when present
+  and surface wall-clock + tokens/s per arm (durations are already in the
+  records). Until that lands, cost columns are est-only for kimi arms and
+  real for DeepSeek arms — label, never mix silently.
 - **Confound to state plainly**: a Deepseek holdout run measures
   model+prompt, not prompt alone. The kimi Anthus holdout (blocked on
   quota until Sep 19) remains the clean prompt-only comparison if we
   still want it; otherwise the Deepseek ladder result IS the restart
   input and the kimi holdout is moot. Matt's call.
+
+## Safety / acceptance gates (every DeepSeek run)
+
+- Every arm writes a FRESH DB under data/exp/ — never banished.db
+  (read-only always), never annotator-full.db / annotator-t1-40.db.
+- `terrarium-annotator verify` exit 0 on every arm DB, or the arm is
+  invalid (same rule as the kimi ladder).
+- First-run smoke gate before any ladder arm: a real multi-round session
+  (tool call → result → continuation) ending in a quote-GATED write that
+  verify accepts — not just /v1/chat/completions probes.
 
 ## Step 5 — resume aspirations on the local path
 
