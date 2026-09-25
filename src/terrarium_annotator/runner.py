@@ -75,6 +75,7 @@ class RunnerConfig:
     tag_priors: dict[str, float] | None = None  # salience weight per tag
     quota_threshold: float | None = 0.50  # weekly-window breaker; <=0 disables
     prompt_file: str | None = None  # prompts/<variant>.md; None = default
+    temperature: float = 0.4  # sampling; set to the model's official default
 
 
 class Runner:
@@ -301,7 +302,7 @@ class Runner:
             return self.llm.chat(
                 messages,
                 tools=self.dispatcher.schemas,
-                temperature=0.4,
+                temperature=self.config.temperature,
                 max_tokens=self.config.max_response_tokens,
             )
         except ChatClientError as exc:

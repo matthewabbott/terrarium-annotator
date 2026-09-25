@@ -140,6 +140,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Model context window (default: 262144; card budget derives "
         "from it — set to the server's real window)",
     )
+    run.add_argument(
+        "--temperature",
+        type=float,
+        default=None,
+        help="Sampling temperature (default: 0.4; use the served model's "
+        "official default for parity arms)",
+    )
     add_provider_args(run)
 
     chat = sub.add_parser(
@@ -287,6 +294,7 @@ def run_pass(
             context_tokens=(
                 args.context_tokens if args.context_tokens is not None else 262144
             ),
+            temperature=args.temperature if args.temperature is not None else 0.4,
         ),
         telemetry=instrumented,
         quota_check=quota_check_factory(args.quota_breaker),
@@ -302,6 +310,9 @@ def run_pass(
                 "provider": args.provider,
                 "thinking": not args.no_thinking,
                 "top_p": args.top_p,
+                "temperature": args.temperature
+                if args.temperature is not None
+                else 0.4,
                 "base_url": getattr(args, "base_url", None),
                 "context_tokens": args.context_tokens
                 if args.context_tokens is not None

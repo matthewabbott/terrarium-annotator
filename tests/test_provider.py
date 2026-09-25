@@ -171,6 +171,7 @@ class TestRunMetaSampling:
             "provider": "local",
             "thinking": False,
             "top_p": 0.95,
+            "temperature": 0.4,
             "base_url": "http://unused:1/v1",
             "context_tokens": 131072,
         }
