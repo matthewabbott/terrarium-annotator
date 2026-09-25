@@ -8,6 +8,7 @@ corpus pair.
 from __future__ import annotations
 
 import argparse
+import os
 import sqlite3
 import sys
 from collections.abc import Callable
@@ -19,6 +20,7 @@ from terrarium_annotator.llm import (
     ChatClient,
     InstrumentedClient,
     OmpRpcClient,
+    OpenAICompatibleClient,
     RecordingClient,
     UsageLog,
     format_summary,
@@ -46,6 +48,51 @@ def parse_threads(value: str) -> list[int]:
         raise argparse.ArgumentTypeError(
             f"--threads takes comma-separated integers: {exc}"
         ) from exc
+
+
+LOCAL_DEFAULT_BASE_URL = "http://127.0.0.1:8888/v1"
+
+
+def add_provider_args(cmd: argparse.ArgumentParser) -> None:
+    """Provider selection flags, shared by all model-driving commands."""
+    cmd.add_argument(
+        "--provider",
+        choices=["kimi", "local"],
+        default="kimi",
+        help="kimi = omp RPC subscription; local = OpenAI-compatible server",
+    )
+    cmd.add_argument(
+        "--base-url",
+        default=None,
+        help="Local server base URL (default: $TERRARIUM_BASE_URL or "
+        f"{LOCAL_DEFAULT_BASE_URL})",
+    )
+    cmd.add_argument(
+        "--no-thinking",
+        action="store_true",
+        help="Local path: disable reasoning (chat_template_kwargs)",
+    )
+    cmd.add_argument("--top-p", type=float, default=None)
+
+
+def build_provider_client(args: argparse.Namespace) -> ChatClient:
+    """Construct the provider client from CLI args (local = OpenAI-
+    compatible; kimi = omp RPC). Sampling knobs recorded by callers."""
+    if args.provider == "local":
+        base_url = (
+            args.base_url
+            or os.environ.get("TERRARIUM_BASE_URL")
+            or LOCAL_DEFAULT_BASE_URL
+        )
+        kwargs: dict = {}
+        if args.no_thinking:
+            kwargs["chat_template_kwargs"] = {"enable_thinking": False}
+        if args.top_p is not None:
+            kwargs["top_p"] = args.top_p
+        return OpenAICompatibleClient(
+            base_url, model=args.model, timeout=args.timeout, **kwargs
+        )
+    return OmpRpcClient(model=args.model, timeout=args.timeout)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -86,6 +133,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Prompt file (default: prompts/reader-v2.md)",
     )
+    run.add_argument(
+        "--context-tokens",
+        type=int,
+        default=None,
+        help="Model context window (default: 262144; card budget derives "
+        "from it — set to the server's real window)",
+    )
+    add_provider_args(run)
 
     chat = sub.add_parser(
         "chat", help="Talk to the archivist about the glossary/story (read-only)"
@@ -102,6 +157,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="data/recordings/usage",
         help="Per-session usage telemetry JSONL directory (always recorded)",
     )
+    add_provider_args(chat)
 
     research = sub.add_parser(
         "research", help="Top-down glossary work over the whole corpus"
@@ -126,6 +182,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Halt when 7-day Kimi quota usedFraction reaches this "
         "(default 0.50; <=0 disables)",
     )
+    add_provider_args(research)
 
     adj = sub.add_parser(
         "adjudicate",
@@ -155,6 +212,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="data/recordings/usage",
         help="Per-session usage telemetry JSONL directory (always recorded)",
     )
+    add_provider_args(adj)
 
     verify_parser = sub.add_parser(
         "verify", help="Check annotator DB invariants against the corpus"
@@ -226,11 +284,31 @@ def run_pass(
             pass_id=args.pass_id,
             quota_threshold=args.quota_breaker,
             prompt_file=args.prompt,
+            context_tokens=(
+                args.context_tokens if args.context_tokens is not None else 262144
+            ),
         ),
         telemetry=instrumented,
         quota_check=quota_check_factory(args.quota_breaker),
     )
+    import json as _json  # local: only run_pass needs it
+
     save_run_meta(conn, "model", args.model)
+    save_run_meta(
+        conn,
+        "sampling",
+        _json.dumps(
+            {
+                "provider": args.provider,
+                "thinking": not args.no_thinking,
+                "top_p": args.top_p,
+                "base_url": getattr(args, "base_url", None),
+                "context_tokens": args.context_tokens
+                if args.context_tokens is not None
+                else 262144,
+            }
+        ),
+    )
     runner.run(max_batches=args.max_batches, only_threads=args.threads)
     return 0
 
@@ -289,9 +367,7 @@ def main(
             provenance=lambda: None,  # chat never writes; no provenance needed
             allowed=READONLY_TOOLS,
         )
-        factory = client_factory or (
-            lambda model: OmpRpcClient(model=model, timeout=args.timeout)
-        )
+        factory = client_factory or (lambda model: build_provider_client(args))
         run_id = make_run_id("chat")
         client = InstrumentedClient(
             factory(args.model),
@@ -315,7 +391,7 @@ def main(
         client: ChatClient = (
             client_factory(args.model)
             if client_factory
-            else (OmpRpcClient(model=args.model, timeout=args.timeout))
+            else build_provider_client(args)
         )
         run_id = make_run_id("research")
         client = InstrumentedClient(
@@ -364,7 +440,7 @@ def main(
         client: ChatClient = (
             client_factory(args.model)
             if client_factory
-            else (OmpRpcClient(model=args.model, timeout=args.timeout))
+            else build_provider_client(args)
         )
         run_id = make_run_id("adjudicate")
         client = InstrumentedClient(
@@ -399,9 +475,7 @@ def main(
         return 0
 
     if args.command == "run":
-        factory = client_factory or (
-            lambda model: OmpRpcClient(model=model, timeout=args.timeout)
-        )
+        factory = client_factory or (lambda model: build_provider_client(args))
         try:
             return run_pass(args, factory, quota_check_factory)
         except ValueError as exc:  # e.g. unknown --threads IDs

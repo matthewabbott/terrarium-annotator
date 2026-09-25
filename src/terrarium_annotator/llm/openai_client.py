@@ -31,6 +31,8 @@ class OpenAICompatibleClient:
         max_retries: int = 3,
         session: requests.Session | None = None,
         attempt_observer: AttemptObserver | None = None,
+        top_p: float | None = None,
+        chat_template_kwargs: dict | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
@@ -48,6 +50,8 @@ class OpenAICompatibleClient:
         self.attempt_observer = attempt_observer
         if api_key:
             self._session.headers["Authorization"] = f"Bearer {api_key}"
+        self.top_p = top_p
+        self.chat_template_kwargs = chat_template_kwargs
 
     def chat(
         self,
@@ -65,7 +69,10 @@ class OpenAICompatibleClient:
             payload["model"] = self.model
         if tools:
             payload["tools"] = tools
-
+        if self.top_p is not None:
+            payload["top_p"] = self.top_p
+        if self.chat_template_kwargs is not None:
+            payload["chat_template_kwargs"] = self.chat_template_kwargs
         last_error: str | None = None
         for attempt in range(1, self.max_retries + 1):
             t0 = time.monotonic()
