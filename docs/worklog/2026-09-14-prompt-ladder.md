@@ -150,6 +150,60 @@ territory.)
   included); quota ledger 17→26→45→60%; breaker halt observed working
   (exit 3, checkpoint preserved).
 
+## Holdout (2026-09-25, post-reset; breaker 0.85)
+
+Anthus academy arc, threads 17–22 (30936089, 31184164, 31223331,
+31247134, 31260696, 31283673). Two arms completed (v2 interrupted once
+by EmptyResponseError — suspected provider/quota transient per Matt;
+the traceback itself is the generic empty-response class — and v1
+twice, EmptyResponseError + RPCTimeoutError — all resumed from
+checkpoint, no batch loss). Weekly quota ledger: 45% start → 69% post-holdout+judge.
+
+### Holdout table
+
+| metric | reader-v1 | reader-v2 (incumbent) |
+|---|---|---|
+| entries | 79 | 147 |
+| entries/1k posts | 302.7 | 563.2 |
+| flag rate (distribution signal) | 17.7% | 39.5% |
+| gold exact-surface (68 pairs, pages 17–22) | 31/68 (45.6%) | 36/68 (52.9%) |
+| est tokens in | 1.31M | 3.12M |
+| tokens/covered entity | **42k** | 87k |
+| attempts err/success | 9/268 | 7/291 |
+| pair candidates (heuristic) | 6 | 11 |
+| judge faithfulness (10/arm, S/P/U) | **3/4/3** | 1/4/5 |
+| verify | exit 0 | exit 0 |
+
+### Generalization verdict: v1 HELD
+
+The holdout reproduces the train shape on the texture-heavy arc: v1 runs
+at half v2's flag rate and ~2× cheaper per covered entity, trailing
+coverage by 5 pairs (45.6% vs 52.9% exact-surface — a FLOOR, alias gap
+unpriced). No collapse on the regime that produced the full run's
+texture admissions. Exact-surface remains the only scored tier.
+
+Judge note (bounded, 10 stratified entries per arm, k2.5 judging gloss
+vs stored quotes): v2's glosses overreach evidence more often (5/10
+unsupported vs v1's 3/10) — consistent with the full-restate rule
+inflating claims past their quotes. Descriptive, small-n.
+
+### Restart recommendation (for Matt)
+
+**reader-v1** as the restart candidate. Rationale: held generalization,
+~2× cost efficiency per covered entity, half the flag rate, better gloss
+faithfulness. The 5-pair coverage deficit is the known alias-gap class
+(mik/suresh), addressable post-pass by the researcher tier + the planned
+alias-aware scorer tier — NOT by a more liberal first pass, whose
+measured costs are 2× tokens and measurably looser glosses. If Matt
+weights first-pass recall above cost, v2 is the fallback with evidence.
+
+### Evidence
+
+- verify exit 0 on both holdout DBs; telemetry merged per arm
+  (/tmp/holdout-v{1,2}-usage.jsonl, 270/292 records); judge calls
+  recorded in data/recordings/usage/judge-v{1,2}-*.jsonl; quota
+  45%→69% (holdout ~20 pts, judge ~1 pt, external ~3 pts).
+
 ### Open questions
 
 - Alias-aware coverage tier in the scorer (labels + token-subset
@@ -160,4 +214,3 @@ territory.)
   partial, or post-pass loss?
 - Do v3's fragment duplicates ("magic"/"magic tomes") need a write-time
   dedupe-before-propose check rather than prompt prose?
-- Holdout + judge runs post-reset (Sep 19), per the plan above.
