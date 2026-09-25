@@ -6,6 +6,8 @@ Corpus access is faked with a dict of post bodies; the gate's contract
 
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
 from terrarium_annotator.glossary import (
@@ -59,6 +61,36 @@ class TestPropose:
             "SELECT post_id, quote FROM entry_source WHERE entry_id = ?", (e.id,)
         ).fetchall()
         assert rows == [(100, "The Vatis gathered at dusk")]
+
+    def test_duplicate_normalized_keys_roll_back_atomically(self, store):
+        """Regression (2026-09-25 DeepSeek parity arm): keys that normalize
+        to the same alias hit the entry_alias UNIQUE constraint mid-write;
+        without rollback the next commit flushes an orphan entry with no
+        revision/sources (verify provenance-coverage violation)."""
+        with pytest.raises(sqlite3.IntegrityError):
+            propose(
+                store,
+                term="Vatis",
+                gloss="A creeping vine.",
+                keys=("Vatis", "vatis"),
+            )
+        # A subsequent successful write must NOT flush the partial state.
+        propose(store)
+        assert (
+            store._conn.execute(
+                "SELECT COUNT(*) FROM entry WHERE term_normalized = 'vatis'"
+            ).fetchone()[0]
+            == 1
+        )  # only the successful entry
+        assert (
+            store._conn.execute("SELECT COUNT(*) FROM revision").fetchone()[0] == 1
+        )  # only its revision
+        assert (
+            store._conn.execute(
+                "SELECT COUNT(*) FROM entry_alias WHERE alias_normalized = 'vatis'"
+            ).fetchone()[0]
+            == 0
+        )  # the colliding alias rolled back
 
     def test_fts_finds_entry(self, store):
         propose(store)

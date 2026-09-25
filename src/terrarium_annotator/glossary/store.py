@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -130,6 +131,22 @@ class DuplicateEntry(GlossaryError):
 
 class UnknownEntry(GlossaryError):
     """No entry with that term/id."""
+
+
+@contextmanager
+def _atomic(conn):
+    """Roll back on any failure inside a multi-row write. Without this,
+    a mid-write exception (e.g. an alias UNIQUE collision inside
+    propose_entry) leaves pending rows that the NEXT successful commit
+    flushes — orphan entries with no revision/sources (observed
+    2026-09-25 on the DeepSeek parity arm: model passed
+    keys=['Well Flower', 'well flower'], which normalize to the same
+    alias; entry + first alias flushed by a later commit)."""
+    try:
+        yield
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def _now() -> str:
@@ -326,43 +343,45 @@ class GlossaryStore:
             raise GlossaryError("term and gloss must be non-empty")
         self._check_collisions(term, keys)
         self._check_evidence(term, keys, evidence)
-
-        now = _now()
-        cur = self._conn.execute(
-            "INSERT INTO entry(term, term_normalized, gloss, status, pass_id,"
-            " created_at, updated_at) VALUES (?, ?, ?, 'tentative', ?, ?, ?)",
-            (term, _norm(term), gloss, provenance.pass_id, now, now),
-        )
-        entry_id = cur.lastrowid
-        assert entry_id is not None
-        for tag in tags:
-            self._conn.execute("INSERT INTO entry_tag VALUES (?, ?)", (entry_id, tag))
-        for key in keys:
-            self._conn.execute(
-                "INSERT INTO entry_alias VALUES (?, ?, ?)",
-                (entry_id, key, _norm(key)),
+        with _atomic(self._conn):
+            now = _now()
+            cur = self._conn.execute(
+                "INSERT INTO entry(term, term_normalized, gloss, status, pass_id,"
+                " created_at, updated_at) VALUES (?, ?, ?, 'tentative', ?, ?, ?)",
+                (term, _norm(term), gloss, provenance.pass_id, now, now),
             )
-        revision_id = self._insert_revision(entry_id, gloss, provenance, now)
-        self._insert_sources(entry_id, revision_id, evidence, provenance, now)
-        self._conn.execute(
-            "INSERT INTO entry_fts(rowid, term, gloss) VALUES (?, ?, ?)",
-            (entry_id, term, gloss),
-        )
-        if is_generic_term(term):
-            # Shadow gate (design §4): log the would-be deferral; never block.
+            entry_id = cur.lastrowid
+            assert entry_id is not None
+            for tag in tags:
+                self._conn.execute(
+                    "INSERT INTO entry_tag VALUES (?, ?)", (entry_id, tag)
+                )
+            for key in keys:
+                self._conn.execute(
+                    "INSERT INTO entry_alias VALUES (?, ?, ?)",
+                    (entry_id, key, _norm(key)),
+                )
+            revision_id = self._insert_revision(entry_id, gloss, provenance, now)
+            self._insert_sources(entry_id, revision_id, evidence, provenance, now)
             self._conn.execute(
-                "INSERT INTO deferred_candidate(term, term_normalized, quote,"
-                " post_id, thread_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (
-                    term,
-                    _norm(term),
-                    evidence[0].quote,
-                    evidence[0].post_id,
-                    provenance.thread_id,
-                    now,
-                ),
+                "INSERT INTO entry_fts(rowid, term, gloss) VALUES (?, ?, ?)",
+                (entry_id, term, gloss),
             )
-        self._conn.commit()
+            if is_generic_term(term):
+                # Shadow gate (design §4): log the would-be deferral; never block.
+                self._conn.execute(
+                    "INSERT INTO deferred_candidate(term, term_normalized, quote,"
+                    " post_id, thread_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        term,
+                        _norm(term),
+                        evidence[0].quote,
+                        evidence[0].post_id,
+                        provenance.thread_id,
+                        now,
+                    ),
+                )
+            self._conn.commit()
         return self.get(entry_id)
 
     def update_entry(
