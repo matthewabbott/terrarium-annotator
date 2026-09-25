@@ -103,6 +103,25 @@ it is deferred until that evidence exists.
   still want it; otherwise the Deepseek ladder result IS the restart
   input and the kimi holdout is moot. Matt's call.
 
+### Metrics acceptance (the tok/s task, made concrete)
+
+Collection exists (telemetry records `usage` verbatim + per-attempt
+`duration_s`). The build is derivation/aggregation, with these contracts:
+
+| metric | definition | contract |
+|---|---|---|
+| completion tok/s | completion_tokens / duration_s | label END-TO-END RPC throughput: duration_s includes request/network latency; retry attempts are separate records (failed ones lack provider usage) |
+| prompt tok/s | prompt_tokens / duration_s | same label |
+| cache-hit rate | cached_tokens / prompt_tokens | cached_tokens is NESTED under usage.prompt_tokens_details — aggregation must normalize nested AND flat shapes; missing field = "unknown", NEVER zero |
+| reasoning share | reasoning_tokens / completion_tokens | nested under completion_tokens_details; same missing≠zero rule |
+| batch latency | sum of a batch's call durations | per-batch wall-clock estimate; the full-run throughput gate |
+| tokens per covered entity | provider tokens when present, est otherwise | never mix silently in one table — label columns |
+
+usage-summary gains per-run + per-call-type sums of the real token
+fields; the scorecard prefers provider tokens when present. Tests:
+nested-vs-flat usage shapes, missing-field → "unknown" (not 0), and a
+two-attempt record where only the success attempt has usage.
+
 ## Safety / acceptance gates (every DeepSeek run)
 
 - Every arm writes a FRESH DB under data/exp/ — never banished.db
