@@ -157,6 +157,57 @@ class TestScorecard:
         assert sc["gold_covered"] == 0
         assert sc["est_tokens_per_covered_entity"] is None  # N/A, not 0
 
+    def test_provider_tokens_preferred_and_labeled(self, variant_db, tmp_path):
+        corpus_path, conn, _ = variant_db
+        corpus = CorpusReader(corpus_path)
+        usage = tmp_path / "u.jsonl"
+        # Provider usage present: prompt 500 real vs est 100 in chars terms.
+        usage.write_text(
+            json.dumps(
+                {
+                    "run_id": "r",
+                    "prompt_chars": 400,
+                    "est_prompt_tokens": 100,
+                    "duration_s": 2.0,
+                    "usage": {
+                        "prompt_tokens": 500,
+                        "completion_tokens": 20,
+                        "prompt_tokens_details": {"cached_tokens": 100},
+                    },
+                    "attempts": [{"status": "success"}],
+                }
+            )
+            + "\n"
+        )
+        sc = scorecard(conn, corpus, GOLD, [101, 102], usage)
+        assert sc["cost_source"] == "provider"
+        assert sc["tokens_per_covered_entity"] == 500  # 500 real / 1 covered
+        assert sc["est_tokens_per_covered_entity"] == 100  # est still shown
+        assert sc["cost"]["provider_tokens_in"] == 500
+        assert sc["cost"]["completion_tok_per_s_e2e"] == 10.0  # 20 / 2.0s
+        text = format_scorecard("v", sc)
+        assert "cost (provider)" in text
+
+    def test_est_only_records_label_est(self, variant_db, tmp_path):
+        corpus_path, conn, _ = variant_db
+        corpus = CorpusReader(corpus_path)
+        usage = tmp_path / "u.jsonl"
+        usage.write_text(
+            json.dumps(
+                {
+                    "run_id": "r",
+                    "prompt_chars": 400,
+                    "est_prompt_tokens": 100,
+                    "attempts": [{"status": "success"}],
+                }
+            )
+            + "\n"
+        )
+        sc = scorecard(conn, corpus, GOLD, [101, 102], usage)
+        assert sc["cost_source"] == "est"
+        assert sc["tokens_per_covered_entity"] == 100
+        assert "provider_tokens_in" not in sc["cost"]
+
     def test_flag_rate_is_deferred_over_entries(self, variant_db):
         corpus_path, conn, _ = variant_db
         conn.execute(

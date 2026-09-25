@@ -103,15 +103,31 @@ def scorecard(
 
     cost: dict = {}
     if usage_path is not None and Path(usage_path).exists():
+        from terrarium_annotator.llm.telemetry import usage_tokens
+
         chars_in = chars_out = tool_calls = 0
         attempts = {"success": 0, "error": 0}
         est_in = est_out = 0
+        provider_in = provider_out = 0
+        saw_prompt_tokens = saw_completion_tokens = False
+        usage_records = 0
+        usage_duration = 0.0
         for rec in iter_records(usage_path):
             chars_in += rec.get("prompt_chars") or 0
             chars_out += rec.get("completion_chars") or 0
             tool_calls += rec.get("tool_calls") or 0
             est_in += rec.get("est_prompt_tokens") or 0
             est_out += rec.get("est_completion_tokens") or 0
+            if rec.get("usage") is not None:
+                usage_records += 1
+                usage_duration += rec.get("duration_s") or 0.0
+                tokens = usage_tokens(rec["usage"])
+                if "prompt_tokens" in tokens:
+                    saw_prompt_tokens = True
+                    provider_in += tokens["prompt_tokens"]
+                if "completion_tokens" in tokens:
+                    saw_completion_tokens = True
+                    provider_out += tokens["completion_tokens"]
             for a in rec.get("attempts") or []:
                 s = a.get("status")
                 if s in attempts:
@@ -124,6 +140,21 @@ def scorecard(
             "est_tokens_out": est_out,
             "attempts": attempts,
         }
+        if usage_records:
+            # Provider-reported tokens (ground truth) + end-to-end RPC
+            # throughput over usage-carrying calls only (retry attempts
+            # without provider usage never enter the denominator).
+            # Absent field = never reported -> None (unknown), not zero.
+            cost["provider_tokens_in"] = provider_in if saw_prompt_tokens else None
+            cost["provider_tokens_out"] = (
+                provider_out if saw_completion_tokens else None
+            )
+            cost["usage_records"] = usage_records
+            cost["usage_duration_s"] = round(usage_duration, 1)
+            if usage_duration > 0 and provider_out and saw_completion_tokens:
+                cost["completion_tok_per_s_e2e"] = round(
+                    provider_out / usage_duration, 1
+                )
 
     return {
         "entries": entries,
@@ -142,6 +173,21 @@ def scorecard(
         "est_tokens_per_covered_entity": (
             round(cost["est_tokens_in"] / len(covered)) if cost and covered else None
         ),
+        # Provider-preferred headline: real tokens when reported, est
+        # otherwise — cost_source labels which, so tables never mix
+        # silently.
+        "tokens_per_covered_entity": (
+            round(cost["provider_tokens_in"] / len(covered))
+            if cost and covered and cost.get("provider_tokens_in")
+            else (
+                round(cost["est_tokens_in"] / len(covered))
+                if cost and covered
+                else None
+            )
+        ),
+        "cost_source": (
+            "provider" if cost.get("provider_tokens_in") else ("est" if cost else None)
+        ),
     }
 
 
@@ -157,12 +203,21 @@ def format_scorecard(name: str, sc: dict) -> str:
     ]
     if sc["cost"]:
         c = sc["cost"]
-        lines.append(
-            f"  cost: chars_in={c['chars_in']} chars_out={c['chars_out']} "
-            f"tool_calls={c['tool_calls']} est_tokens_in={c['est_tokens_in']} "
-            f"attempts={c['attempts']} "
-            f"tokens/covered={sc['est_tokens_per_covered_entity']}"
+        line = (
+            f"  cost ({sc['cost_source']}): chars_in={c['chars_in']} "
+            f"chars_out={c['chars_out']} tool_calls={c['tool_calls']} "
+            f"est_tokens_in={c['est_tokens_in']} attempts={c['attempts']} "
+            f"tokens/covered={sc['tokens_per_covered_entity']}"
         )
+        if c.get("provider_tokens_in") is not None:
+            line += (
+                f"\n  provider: tokens_in={c['provider_tokens_in']} "
+                f"tokens_out={c['provider_tokens_out']} "
+                f"usage_records={c['usage_records']} "
+                f"duration_s={c['usage_duration_s']} "
+                f"completion_tok_per_s_e2e={c.get('completion_tok_per_s_e2e')}"
+            )
+        lines.append(line)
     if sc["token_subset_pair_candidates"]:
         lines.append(
             f"  token-subset pair candidates (heuristic): "

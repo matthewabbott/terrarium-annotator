@@ -224,6 +224,29 @@ def iter_records(path: str | Path) -> Iterator[dict]:
                     yield json.loads(line)
 
 
+def usage_tokens(usage: dict) -> dict:
+    """Normalize a provider usage dict (flat or nested details) to
+    {prompt_tokens, completion_tokens, cached_tokens, reasoning_tokens}.
+    DeepSeek/vLLM nests cached_tokens under prompt_tokens_details and
+    reasoning_tokens under completion_tokens_details; OpenAI-style flat
+    shapes are also accepted. Missing fields are ABSENT from the result —
+    never zero-filled (unknown is not zero)."""
+    out: dict = {}
+    for key in ("prompt_tokens", "completion_tokens"):
+        value = usage.get(key)
+        if isinstance(value, (int, float)):
+            out[key] = int(value)
+    details_in = usage.get("prompt_tokens_details") or {}
+    cached = usage.get("cached_tokens", details_in.get("cached_tokens"))
+    if isinstance(cached, (int, float)):
+        out["cached_tokens"] = int(cached)
+    details_out = usage.get("completion_tokens_details") or {}
+    reasoning = usage.get("reasoning_tokens", details_out.get("reasoning_tokens"))
+    if isinstance(reasoning, (int, float)):
+        out["reasoning_tokens"] = int(reasoning)
+    return out
+
+
 def _new_bucket() -> dict:
     return {
         "calls": 0,
@@ -234,6 +257,8 @@ def _new_bucket() -> dict:
         "est_prompt_tokens": 0,
         "est_completion_tokens": 0,
         "provider_usage_records": 0,
+        "provider_tokens": {},  # field -> sum; only fields ever reported
+        "usage_duration_s": 0.0,  # summed duration of usage-carrying calls
         "attempts": {"success": 0, "error": 0},
         "error_types": {},
     }
@@ -252,6 +277,12 @@ def _add(bucket: dict, rec: dict) -> None:
     bucket["est_completion_tokens"] += rec.get("est_completion_tokens") or 0
     if rec.get("usage") is not None:
         bucket["provider_usage_records"] += 1
+        tokens = usage_tokens(rec["usage"])
+        for k, v in tokens.items():
+            bucket["provider_tokens"][k] = bucket["provider_tokens"].get(k, 0) + v
+        # End-to-end RPC duration of usage-carrying calls only (retry
+        # attempts without provider usage never enter the denominator).
+        bucket["usage_duration_s"] += rec.get("duration_s") or 0.0
     for a in rec.get("attempts") or []:
         status = a.get("status")
         if status in bucket["attempts"]:
@@ -285,6 +316,29 @@ def _format_bucket(name: str, b: dict) -> str:
     if b["error_types"]:
         errs = ", ".join(f"{k}×{v}" for k, v in sorted(b["error_types"].items()))
         line += f"\n    error_types: {errs}"
+    pt = b.get("provider_tokens") or {}
+    if pt:
+        line += (
+            f"\n    provider_tokens: {pt}"
+            f" (records={b['provider_usage_records']},"
+            f" duration_s={b['usage_duration_s']:.1f})"
+        )
+        comp = pt.get("completion_tokens")
+        if comp and b["usage_duration_s"] > 0:
+            # END-TO-END RPC throughput: duration includes network latency.
+            line += f"\n    completion_tok_per_s_e2e={comp / b['usage_duration_s']:.1f}"
+            prompt = pt.get("prompt_tokens")
+            if prompt:
+                line += f" prompt_tok_per_s_e2e={prompt / b['usage_duration_s']:.1f}"
+        if pt.get("prompt_tokens") and "cached_tokens" in pt:
+            line += (
+                f"\n    cache_hit_rate={pt['cached_tokens'] / pt['prompt_tokens']:.3f}"
+            )
+        if pt.get("completion_tokens") and "reasoning_tokens" in pt:
+            line += (
+                f"\n    reasoning_share="
+                f"{pt['reasoning_tokens'] / pt['completion_tokens']:.3f}"
+            )
     return line
 
 

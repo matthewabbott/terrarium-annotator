@@ -24,6 +24,7 @@ from terrarium_annotator.llm import (
     ScriptedModel,
     ToolCall,
     UsageLog,
+    format_summary,
     make_run_id,
     summarize,
     usage_log_path,
@@ -322,3 +323,108 @@ class TestRunIdentity:
         assert path.parent == tmp_path
         assert "/" not in path.name
         assert path.suffix == ".jsonl"
+
+
+class TestProviderTokenMetrics:
+    """Metrics acceptance: nested/flat usage shapes, missing=unknown,
+    derived rates over usage-carrying calls only (plan: metrics table)."""
+
+    def test_usage_tokens_nested_deepseek_shape(self):
+        from terrarium_annotator.llm.telemetry import usage_tokens
+
+        usage = {
+            "prompt_tokens": 100,
+            "completion_tokens": 25,
+            "total_tokens": 125,
+            "prompt_tokens_details": {"cached_tokens": 40},
+            "completion_tokens_details": {"reasoning_tokens": 10},
+        }
+        assert usage_tokens(usage) == {
+            "prompt_tokens": 100,
+            "completion_tokens": 25,
+            "cached_tokens": 40,
+            "reasoning_tokens": 10,
+        }
+
+    def test_usage_tokens_flat_shape(self):
+        from terrarium_annotator.llm.telemetry import usage_tokens
+
+        usage = {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "cached_tokens": 2,
+            "reasoning_tokens": 1,
+        }
+        assert usage_tokens(usage) == {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "cached_tokens": 2,
+            "reasoning_tokens": 1,
+        }
+
+    def test_missing_fields_absent_never_zero(self):
+        from terrarium_annotator.llm.telemetry import usage_tokens
+
+        assert usage_tokens({"prompt_tokens": 10}) == {"prompt_tokens": 10}
+
+    def test_summary_aggregates_provider_tokens_and_rates(self, tmp_path):
+        # Raw record with explicit duration (scripted calls are sub-ms and
+        # round to 0.0 — the zero-duration rate guard stays untested here).
+        path = tmp_path / "u.jsonl"
+        path.write_text(
+            json.dumps(
+                {
+                    "run_id": "r",
+                    "call_type": "annotation",
+                    "duration_s": 2.0,
+                    "status": "success",
+                    "prompt_chars": 400,
+                    "completion_chars": 100,
+                    "tool_calls": 1,
+                    "attempts": [{"status": "success"}],
+                    "usage": {
+                        "prompt_tokens": 100,
+                        "completion_tokens": 25,
+                        "prompt_tokens_details": {"cached_tokens": 40},
+                        "completion_tokens_details": {"reasoning_tokens": 5},
+                    },
+                }
+            )
+            + "\n"
+        )
+        summary = summarize(path)
+        bucket = summary["runs"]["r"]
+        assert bucket["provider_tokens"]["prompt_tokens"] == 100
+        assert bucket["provider_tokens"]["cached_tokens"] == 40
+        assert bucket["provider_tokens"]["reasoning_tokens"] == 5
+        text = format_summary(summary)
+        assert "provider_tokens" in text
+        assert "completion_tok_per_s_e2e=12.5" in text  # 25 / 2.0s
+        assert "prompt_tok_per_s_e2e=50.0" in text
+        assert "cache_hit_rate=0.400" in text
+        assert "reasoning_share=0.200" in text
+
+    def test_error_attempt_excluded_from_rate_denominator(self, tmp_path):
+        # A two-call sequence where the error call carries no usage: the
+        # e2e rate divides only by the usage-carrying call's duration.
+        log = UsageLog(tmp_path / "u.jsonl")
+        inner = ScriptedModel(
+            [
+                ChatClientError("boom"),
+                ChatResponse(
+                    content="ok",
+                    raw={"usage": {"prompt_tokens": 50, "completion_tokens": 10}},
+                ),
+            ]
+        )
+        client = InstrumentedClient(inner, log, run_id="r")
+        with pytest.raises(ChatClientError):
+            client.chat([{"role": "user", "content": "hi"}])
+        client.chat([{"role": "user", "content": "hi"}])
+        log.close()
+        bucket = summarize(log.path)["runs"]["r"]
+        assert bucket["provider_tokens"] == {
+            "prompt_tokens": 50,
+            "completion_tokens": 10,
+        }
+        assert bucket["provider_usage_records"] == 1  # error call not counted
