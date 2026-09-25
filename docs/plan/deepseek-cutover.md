@@ -122,6 +122,34 @@ fields; the scorecard prefers provider tokens when present. Tests:
 nested-vs-flat usage shapes, missing-field → "unknown" (not 0), and a
 two-attempt record where only the success attempt has usage.
 
+
+### Memory levers (noted 2026-09-25; NOT applied — running current config)
+
+Cluster runs at the floor of the healthy band (spark1 ~2 GiB, spark2
+~3 GiB available post-load; symmetric by construction — TP=2 splits
+99.5 GiB weights and the 2.5 GiB KV pool evenly, no rebalancing possible).
+Metrics track context length per call (telemetry context components +
+provider prompt_tokens), so an OOM-class failure IS the limit signal.
+If that happens, in order of preference for OUR workload (single-stream,
+≤~120k-token prompts measured in kimi parity runs; 262k is the
+kimi-parity ceiling, not a need):
+
+1. **KV pool shrink**: KV_CACHE_MEMORY_BYTES is the knob (pinned
+   separately — MAX_MODEL_LEN alone does NOT shrink the pool). Halving
+   the 2.5 GiB pool covers contexts to ~300k tokens at ~3.4 KiB/token.
+   README warning: every 0.5 GiB pool cut costs ~1 GiB of head prefill
+   margin — only safe because our prompts never approach the deep end.
+2. **SPEC_METHOD=none**: frees ~3.5 GiB (scope per README flags column —
+   verify per-rank vs per-node before counting on it), but single-stream
+   decode drops 31.6 → 23 tok/s (measured). That's ~27% slower annotation
+   wall-clock — only when memory, not speed, is the binding constraint.
+3. SSD offload: rejected — the build already avoids host pinning by
+   design ("the row store replaces vLLM's cpu_offload"), and NVMe vs
+   unified memory loses an order of magnitude of bandwidth.
+
+All are Matt-authorized playbook edits only — agents never touch cluster
+config.
+
 ## Safety / acceptance gates (every DeepSeek run)
 
 - Every arm writes a FRESH DB under data/exp/ — never banished.db
