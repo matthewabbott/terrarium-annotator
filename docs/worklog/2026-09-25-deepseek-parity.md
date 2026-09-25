@@ -26,17 +26,39 @@ Canonical DBs (data/annotator-full.db, data/annotator-t1-40.db) stay in
 place — referenced across docs and worklogs; their model provenance lives
 in run_meta/pass_id.
 
-## Wiring
+## Wiring (COMPLETE, commit 0cf6af2)
 
-_Pending._
+`--provider kimi|local` + `--base-url` + `--no-thinking` + `--top-p` on
+all four model commands; `--context-tokens` on run; OpenAICompatibleClient
+gains top_p/chat_template_kwargs passthrough; run_meta records sampling
+provenance. 9 L0 tests. 247 passed.
 
-## Metrics
+## Metrics (COMPLETE, commit a253df8)
 
-_Pending._
+usage_tokens normalizer (nested/flat, missing=absent); usage-summary
+provider token sums + e2e tok/s + cache-hit + reasoning share; scorecard
+provider-preferred headline with cost_source label. 7 L0 tests. 254
+passed.
 
-## Smoke gate
+## Smoke gate (PASSED first attempt, 2026-09-25)
 
-_Pending._
+Run: `run --provider local --model DeepSeek-v4.1-Flash-EXL3
+--no-thinking` on a fabricated 2-thread corpus (data/exp/smoke-corpus.db,
+the "Zephra stone" story), DB data/exp/smoke-deepseek.db.
+
+- Multi-round session worked: 17 calls, 25 tool calls, 0 errors/retries,
+  2m01s for 2 batches + 1 merge settle.
+- `verify` exit 0 — all quotes verbatim (mechanically checked).
+- Merge-tree settle produced a clean single-line gist (OptMem format
+  compatible with the deepseek_v41 template).
+- Gloss fidelity strong on n=4 entries: "Its nature, origin, and purpose
+  are not yet explained" — proper epistemic restraint, no overreach.
+- First REAL token telemetry: 59k prompt / 4.2k completion tokens;
+  **34.8 tok/s decode e2e** (par with the playbook's 31.6 measured
+  single-stream); **cache_hit_rate 0.811** — vLLM prefix cache hits
+  across tool rounds, which dissolves much of the kimi cold-context cost
+  structure locally; reasoning_share 0 (thinking-off honored).
+
 
 ## Parity arm
 

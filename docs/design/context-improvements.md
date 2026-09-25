@@ -55,9 +55,9 @@ Retrieve top-k entries (k=20-30) and inject as `<known_glossary>`.
 ```python
 # New: src/terrarium_annotator/retrieval/glossary_index.py
 
+
 class GlossaryIndex:
-    def __init__(self, db_path: Path, embed_fn: Callable[[str], list[float]]):
-        ...
+    def __init__(self, db_path: Path, embed_fn: Callable[[str], list[float]]): ...
 
     def upsert(self, entry: GlossaryEntry) -> None:
         """Re-embed and store entry."""
@@ -65,8 +65,9 @@ class GlossaryIndex:
     def delete(self, entry_id: int) -> None:
         """Remove from index."""
 
-    def search(self, query: str, k: int = 25,
-               alpha: float = 0.6) -> list[tuple[GlossaryEntry, float]]:
+    def search(
+        self, query: str, k: int = 25, alpha: float = 0.6
+    ) -> list[tuple[GlossaryEntry, float]]:
         """Hybrid BM25 + vector search."""
 
     def rebuild(self) -> None:
@@ -127,17 +128,24 @@ Agent: [emits tool calls or FLUSH_OK]
 ```python
 # In runner.py, before calling compactor.compact():
 
-def _pre_compaction_flush(self, context: AnnotationContext, messages: list[dict]) -> list[dict]:
+
+def _pre_compaction_flush(
+    self, context: AnnotationContext, messages: list[dict]
+) -> list[dict]:
     """Give agent one turn to emit pending tool calls before compaction."""
     flush_messages = list(messages)
-    flush_messages.append({
-        "role": "system",
-        "content": PRE_COMPACTION_FLUSH_PROMPT,
-    })
-    flush_messages.append({
-        "role": "user",
-        "content": "Emit any pending glossary/codex updates now, or respond FLUSH_OK.",
-    })
+    flush_messages.append(
+        {
+            "role": "system",
+            "content": PRE_COMPACTION_FLUSH_PROMPT,
+        }
+    )
+    flush_messages.append(
+        {
+            "role": "user",
+            "content": "Emit any pending glossary/codex updates now, or respond FLUSH_OK.",
+        }
+    )
 
     response = self.agent.chat(
         messages=flush_messages,
@@ -152,8 +160,9 @@ def _pre_compaction_flush(self, context: AnnotationContext, messages: list[dict]
             self.tool_dispatcher.dispatch(call)
 
     # Record the flush turn in context history
-    context.record_turn("assistant", response.message.get("content", ""),
-                        thread_id=..., scene_index=...)
+    context.record_turn(
+        "assistant", response.message.get("content", ""), thread_id=..., scene_index=...
+    )
 
     return context.build_messages(...)
 ```
@@ -197,30 +206,41 @@ A single cumulative summary string inevitably drifts — each LLM rewrite loses 
 class StructuredSummary:
     """Cumulative summary broken into independently-managed sections."""
 
-    characters: str = ""        # Who's who, relationships, arcs
-    active_plot: str = ""       # Current narrative threads, unresolved tensions
-    world_state: str = ""       # Locations, factions, political landscape
-    mechanics: str = ""         # Magic systems, rules, cultivation stages
+    characters: str = ""  # Who's who, relationships, arcs
+    active_plot: str = ""  # Current narrative threads, unresolved tensions
+    world_state: str = ""  # Locations, factions, political landscape
+    mechanics: str = ""  # Magic systems, rules, cultivation stages
     annotation_progress: str = ""  # What's been glossarized, coverage gaps
 
     def to_xml(self) -> str:
         sections = []
-        for field_name in ["characters", "active_plot", "world_state",
-                          "mechanics", "annotation_progress"]:
+        for field_name in [
+            "characters",
+            "active_plot",
+            "world_state",
+            "mechanics",
+            "annotation_progress",
+        ]:
             content = getattr(self, field_name)
             if content:
                 sections.append(f"<{field_name}>{content}</{field_name}>")
         return f"<cumulative_summary>\n{''.join(sections)}\n</cumulative_summary>"
 
     def to_dict(self) -> dict:
-        return {f: getattr(self, f) for f in
-                ["characters", "active_plot", "world_state",
-                 "mechanics", "annotation_progress"]}
+        return {
+            f: getattr(self, f)
+            for f in [
+                "characters",
+                "active_plot",
+                "world_state",
+                "mechanics",
+                "annotation_progress",
+            ]
+        }
 
     @classmethod
     def from_dict(cls, data: dict) -> StructuredSummary:
-        return cls(**{k: v for k, v in data.items()
-                     if k in cls.__dataclass_fields__})
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
 ```
 
 **Section-aware merging**: When merging a new thread summary, the LLM updates only the relevant sections:
@@ -420,31 +440,36 @@ To validate that simplification doesn't hurt quality, we need a systematic way t
 ```python
 # New: src/terrarium_annotator/eval/comparator.py
 
+
 @dataclass
 class EvalConfig:
     """Configuration for a single evaluation run."""
-    name: str                    # "reader-mode-gpt4" or "thread-mode-qwen3"
+
+    name: str  # "reader-mode-gpt4" or "thread-mode-qwen3"
     corpus_range: tuple[int, int]  # (start_thread_id, end_thread_id)
     runner_config: RunnerConfig
     model_endpoint: str
     description: str = ""
 
+
 @dataclass
 class EvalResult:
     """Metrics from a single run."""
+
     config_name: str
     entries_created: int
-    entries_by_tag: dict[str, int]      # character: 12, location: 8, ...
-    entries_by_status: dict[str, int]   # confirmed: 45, tentative: 30
+    entries_by_tag: dict[str, int]  # character: 12, location: 8, ...
+    entries_by_status: dict[str, int]  # confirmed: 45, tentative: 30
     avg_definition_length: float
-    cross_ref_count: int                # [[Term]] references
-    duplicate_candidates: int           # entries with >0.9 cosine similarity
+    cross_ref_count: int  # [[Term]] references
+    duplicate_candidates: int  # entries with >0.9 cosine similarity
     tool_calls_total: int
     inference_calls: int
     total_tokens: int
     wall_time_seconds: float
     # Qualitative (human-scored after)
     sample_entries: list[GlossaryEntry]  # Random sample for human review
+
 
 class EvalComparator:
     """Run multiple configurations on the same corpus range and compare."""
