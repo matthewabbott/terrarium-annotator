@@ -138,3 +138,82 @@ claim traces to: pytest/ruff merge bars, verify runs, ladder-score,
 usage-summary, and git ls-remote. Outstanding follow-ups (Matt's call):
 density adjudication of the DeepSeek arm's extra entries; reader-v1 on
 Deepseek as the density-control arm; then the restart decision.
+
+## Adjudication of the parity arm (2026-09-25)
+
+60 stratified flagged candidates (of 229), adjudicate subcommand on the
+LOCAL provider against a byte-identical copy
+(data/exp/deepseek-reader-v2b-adjudication.db; evidence DB untouched,
+md5-verified; first accidental launch killed at 27s with 0 writes).
+
+**Texture rate: 10/60 = 16.7%** — statistically indistinguishable from
+the kimi full-run's 18%. DeepSeek's higher flag rate (63.8% vs 53%) is
+NOT a precision problem: its flagged candidates are valid at the same
+rate as kimi's. The density divergence is VOLUME of borderline-but-valid
+minor entries, not junk.
+
+Texture classes (same shape as kimi's): generic scenery/objects (wagon,
+tall grass, cave, inn), ordinary-sense common nouns (animal, wine,
+bowyer, wrought bronze, high grade), one vague single-allusion
+(bastard prince — borderline, dream reference).
+
+Implication for the ladder: draconian tightening would sacrifice real
+recall for nothing — the grace philosophy is data-supported. reader-v4's
+job is VOLUME restraint on borderline-valid minors, not texture
+excision. The >40% quality stop condition was NOT met (16.7%).
+
+## Prompt laddering on Deepseek (2026-09-26, overnight)
+
+Three arms × threads 1–5 + two holdout arms (threads 17–22), all verify
+exit 0, all provider-token costed. Texture rates come from adjudicated
+stratified samples of the TRAIN arms' flagged candidates (n=40–60 per
+arm; holdout arms were NOT adjudicated — their texture is unmeasured).
+
+### Train (threads 1–5)
+
+| metric | DS reader-v1 | DS reader-v2 | DS reader-v4 (grace) |
+|---|---|---|---|
+| gold exact (52) | 22 (42.3%) | 25 (48.1%) | 24 (46.2%) |
+| entries/1k posts | 389.6 | 1165.6 | 548.7 |
+| flag rate (context) | 40.0% | 63.8% | 53.3% |
+| **texture (adjudicated)** | **1/40 = 2.5%** | 10/60 = 16.7% | 3/50 = 6.0% |
+| tokens/covered (provider) | 108k | 381k | 227k |
+| wall | 1h00m | 3h20m | 2h22m |
+
+### Holdout (threads 17–22)
+
+| metric | DS reader-v1 | DS reader-v4 | (kimi v1) | (kimi v2) |
+|---|---|---|---|---|
+| gold exact (68) | **35 (51.5%)** | 33 (48.5%) | 31 | 36 |
+| entries/1k posts | 513.4 | 647.5 | 303 | 563 |
+| flag rate | 35.1% | 36.7% | 17.7% | 39.5% |
+| tokens/covered | 63k | 144k | 42k (est) | 87k (est) |
+| verify | exit 0 | exit 0 | exit 0 | exit 0 |
+
+### Verdict: reader-v1 SHIPS (on the observed samples)
+
+On the observed samples: v1 leads every gate — lowest measured texture
+(2.5% on n=40), lowest cost per covered entity, lowest density — and it
+also outcovered v4 on the holdout (35 vs 33), erasing v4's small
+train-slice advantage. Caveat: adjudication samples differ in n and
+population (v1 40, v4 50, v2 60), so texture comparisons are estimates,
+not precise rates. Against kimi: DS-v1 matched kimi-v2's holdout
+coverage (35 vs 36) at 73% of the est cost, with a measured texture
+rate well below the liberal arms' adjudicated 17-18%. The v4 grace
+experiment is a defensible middle option with no measured advantage —
+recorded, not shipped.
+
+reader-v4.md stays in the tree as the documented grace variant
+(recurrence-safeguarded, class-level exclusions; the first overfit
+version was stopped at 45s and its 0-entry partial deleted).
+
+### Follow-on (per goal: state which and why)
+
+**Full-quest run on Deepseek with reader-v1** — kicked off as a
+supervised checkpointed process (data/deepseek-full.db). Why not the
+researcher tier first: the winner's glossaries are 5-thread slices —
+researcher value is post-corpus. The full run is the project's point;
+throughput is proven (32–34 tok/s sustained, ~2000 calls, 0 errors),
+memory held at the floor with peak context ~41k est tokens, and
+checkpointing is proven across all arms. Researcher tier lands after
+the full pass completes.
