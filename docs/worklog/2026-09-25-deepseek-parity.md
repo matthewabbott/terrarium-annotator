@@ -213,6 +213,11 @@ version was stopped at 45s and its 0-entry partial deleted).
 supervised checkpointed process (data/deepseek-full.db). Why not the
 researcher tier first: the winner's glossaries are 5-thread slices —
 researcher value is post-corpus. The full run is the project's point;
+
+
+Launch evidence (2026-09-26 ~17:00 UTC): process `full-run` healthy at
+10 minutes — checkpoint thread 30305969 batch 6, 11 batches, 34
+entries, advancing. Remote verified at 050ffdc before launch.
 throughput is proven (32–34 tok/s sustained, ~2000 calls, 0 errors),
 memory held at the floor with peak context ~41k est tokens, and
 checkpointing is proven across all arms. Researcher tier lands after
