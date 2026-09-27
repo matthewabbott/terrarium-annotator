@@ -71,6 +71,12 @@ class RunnerConfig:
                 raise ValueError("rolling_window_tokens must be positive when set")
             if self.rolling_min_threads < 1:
                 raise ValueError("rolling_min_threads must be >= 1")
+            if self.rolling_trim_target is not None and not (
+                0 < self.rolling_trim_target < self.rolling_window_tokens
+            ):
+                raise ValueError(
+                    "rolling_trim_target must be positive and below the window"
+                )
 
     batch_size: int = DEFAULT_BATCH_SIZE
     context_tokens: int = 262_144
@@ -80,6 +86,7 @@ class RunnerConfig:
     max_tool_rounds: int = 8
     max_response_tokens: int = 2048
     tag_priors: dict[str, float] | None = None  # salience weight per tag
+    rolling_trim_target: int | None = None  # hysteresis: trim to this, not the cap
     quota_threshold: float | None = 0.50  # weekly-window breaker; <=0 disables
     prompt_file: str | None = None  # prompts/<variant>.md; None = default
     temperature: float = 0.4  # sampling; set to the model's official default
@@ -386,29 +393,35 @@ class Runner:
         if self._messages is None:
             return
         budget = cfg.rolling_window_tokens
-        while self._window_tokens() > budget and len(self._thread_spans) > max(
+        # Hysteresis (Matt 2026-09-27): a front-drop invalidates the WHOLE
+        # cached prefix, so when over budget, trim to the target — fewer,
+        # bigger trims amortize the full re-prefill across more calls.
+        target = cfg.rolling_trim_target or budget
+        if self._window_tokens() <= budget:
+            return
+        # Over budget: trim closed spans to the TARGET — floor first,
+        # then floor yields if the target still isn't met.
+        while self._window_tokens() > target and len(self._thread_spans) > max(
             1, cfg.rolling_min_threads
         ):
             self._drop_oldest_span()
-        while self._window_tokens() > budget and self._thread_spans:
-            self._drop_oldest_span()  # floor yields to the cap; the OPEN
-            # span (current thread) is never in _thread_spans, so it
-            # survives — only closed spans drop here.
-        # Open span alone over budget: truncate the current thread's
-        # OLDEST messages (at the span's actual start — never the system
-        # message at index 0, never the in-flight batch at/after
-        # _batch_open). The digest covers dropped content.
+        while self._window_tokens() > target and self._thread_spans:
+            self._drop_oldest_span()  # floor yields; the OPEN span (current
+            # thread) is never in _thread_spans, so it survives.
+        # Open span alone over target: truncate its oldest messages —
+        # never the system message (index 0), never the in-flight batch
+        # (at/after _batch_open). The digest covers dropped content.
         while (
-            self._window_tokens() > budget
+            self._window_tokens() > target
             and self._span_open is not None
             and self._batch_open is not None
             and self._span_open < self._batch_open
         ):
             del self._messages[self._span_open]
             self._batch_open -= 1
-        # The in-flight batch alone must fit. If not, that's a config
-        # error — raise locally (checkpoint untouched, resume
-        # re-attempts) instead of paying the server for a 400.
+        # The in-flight batch alone must fit the BUDGET. If not, config
+        # error — raise locally (checkpoint untouched, resume re-attempts)
+        # instead of paying the server for a 400.
         if self._window_tokens() > budget:
             raise ChatClientError(
                 f"rolling window over budget after enforcement: "

@@ -161,6 +161,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=5,
         help="Rolling mode: never drop below this many threads in window",
     )
+    run.add_argument(
+        "--rolling-trim-target",
+        type=int,
+        default=None,
+        help="Rolling hysteresis: on breaching the window budget, trim to "
+        "this target instead of just under the cap (fewer, bigger trims "
+        "amortize the full-prefix cache miss)",
+    )
     add_provider_args(run)
 
     chat = sub.add_parser(
@@ -311,6 +319,7 @@ def run_pass(
             temperature=args.temperature if args.temperature is not None else 0.4,
             rolling_window_tokens=args.rolling_window_tokens,
             rolling_min_threads=args.rolling_min_threads,
+            rolling_trim_target=args.rolling_trim_target,
         ),
         telemetry=instrumented,
         quota_check=quota_check_factory(args.quota_breaker),

@@ -181,6 +181,29 @@ class TestEnforcementIndexes:
         assert contents == ["c", "z"]  # oldest-first within the open span
         assert runner._window_tokens() <= 300
 
+    def test_hysteresis_trims_to_target_below_cap(self, tmp_path):
+        runner = self._runner_with_spans(tmp_path)
+        # Window 750, target 400: initial ~1025 tokens over cap → closed
+        # spans drop to the TARGET (both go: 725 then 425 still > 400),
+        # then one 'y' truncates (325 ≤ 400). Without hysteresis the same
+        # fixture stops at ≤750 (one span survives). Matt 2026-09-27:
+        # fewer, bigger trims amortize the full-prefix cache miss.
+        runner.config.rolling_window_tokens = 750
+        runner.config.rolling_trim_target = 400
+        runner._enforce_window()
+        contents = [m["content"][0] for m in runner._messages[1:]]
+        assert "x" not in contents  # both closed spans dropped to target
+        assert contents == ["y", "y", "z"]  # one y truncated to hit target
+        assert runner._window_tokens() <= 400
+
+    def test_trim_target_below_window_validated(self, tmp_path):
+        from terrarium_annotator.runner import RunnerConfig
+
+        with pytest.raises(ValueError, match="below the window"):
+            RunnerConfig(rolling_window_tokens=100, rolling_trim_target=100)
+        with pytest.raises(ValueError, match="below the window"):
+            RunnerConfig(rolling_window_tokens=100, rolling_trim_target=200)
+
     def test_inflight_batch_over_budget_raises_locally(self, tmp_path):
         from terrarium_annotator.llm import ChatClientError
         from terrarium_annotator.state import load_run_state
