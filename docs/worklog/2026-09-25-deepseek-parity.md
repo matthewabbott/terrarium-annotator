@@ -355,11 +355,17 @@ Tuned full-quest run launched (2026-09-27 ~14:50 UTC):
 `full-rolling-v2` on data/deepseek-rolling-full-v2.db — window 200k,
 min_threads 7, trim target 150k, reader-v1, Deepseek. Fresh from thread
 1 (min-5 baseline `full-rolling` keeps running on the second sequence
+slot — both were advancing at +15m: v2 at thread 30305969 batch 12,
+baseline at thread 30665078 batch 16).
 
 FIRST TRIM EVENT (2026-09-27 ~16:04 UTC): annotation-call window reached
 200,430 provider tokens (just over the 200k budget) → hysteresis trimmed
-to 112,490 (under the 150k target via whole-thread drops). The mechanic
-works in production, at scale, on the first breach.
+to 112,490. Note: 112k is NOT the 150k target — whole-thread dropping
+overshoots below the target when the dropped threads are large; the
+policy only guarantees ≤ target. The mechanic worked as designed on the
+live full run, and the run continued healthily afterward (checkpoints
+advanced through thread 6+). n=1 trim so far — reliability/frequency
+claims wait for more events.
 
 ### Prefix comparison + decision (2026-09-27)
 
@@ -372,14 +378,19 @@ All runs stochastic n=1 per config.
 
 | | tuned (min-7, hyst→150k) | baseline (min-5) | rolling slice arm |
 |---|---|---|---|
-| gold exact (52) | 21 (40.4%) | 23 (44.2%)† | 25 (48.1%) |
+| gold exact (52) | 21 (40.4%) | 23 (44.2%) | 25 (48.1%) |
 | entries (t1–5) | 83 | 79 | 69 |
 | flag rate (t1–5, context) | 32.5% | 36.7% | 27.5% |
 | trims fired | 1 (200,430→112,490) | 0 (never breached) | 0 |
 
-(† resolved: contamination caveat disproved by the clean filter — 23/52
-stands, measured via entry_thread_filter, new in ladder.py with a
-regression test.)
+Method: both coverage numbers computed via `surface_coverage` with
+`entry_thread_filter` = the five slice thread IDs (inline API script —
+no CLI flag exists; new in ladder.py, regression-tested for both term
+and alias contamination paths). The baseline's 23/52 is CLEAN (no
+foresight contamination: its later entries cover no additional 1–5 gold
+pairs). The tuned number was first computed while its thread 5 was still
+in progress; rescored at ~16:45 UTC with threads 1–6 complete — 21/52
+unchanged, so partial-depth does not explain the gap.
 
 **Decision: KEEP the tuned config** (min-7 + hysteresis). Deciding
 metric: coverage vs the min-5 baseline on the overlapping prefix is
@@ -387,8 +398,30 @@ within the ±2-pair tolerance (21 vs 23) — the goal's comparison
 contract. The −4 gap vs the slice arm is noted honestly: different
 process, uncontrolled stochasticity, and that arm ran at min-5 with no
 trims. Trim mechanics proven in production: the first breach trimmed
-cleanly below the 150k target. The baseline min-5 run continues to
-completion as the comparison lineage; its data stays regardless.
+cleanly below the 150k target (overshoot to 112k noted above). The
+baseline min-5 run continues to completion as the comparison lineage;
+its data stays regardless.
+
+### Goal criterion audit (2026-09-27, honest read)
+
+1. Benchmark trim-safety: **PASS on mechanism, FAIL on the stated
+   threshold.** The criterion asked: hysteresis arm coverage within ±2
+   pairs of the rolling slice arm (25/52). Both 100k arms scored 19/52
+   — a −6 gap, threshold NOT MET as written. What was established
+   instead: trim-vs-control recall equal (19/52 = 19/52 — consistent
+   with a window-size effect; arms also ran under concurrent load at
+   n=1, so attribution is PROVISIONAL) and texture PASS (0/20, 1/30
+   adjudicated, no spike). No trim-induced recall or texture
+   degradation was observed in this sample. The stop condition was
+   "trim-induced quality collapse"; proceeding past the unmet ±2
+   threshold was a judgment call made under advisory adjudication (the
+   threshold compared across window sizes the benchmark deliberately
+   shrank); flagged here for Matt rather than silently redefined.
+2. Tuned full run launched + first trim recorded: MET (launch evidence,
+   trim at 200,430 → 112,490).
+3. Comparison section: MET (above; clean source-filtered numbers).
+4. Decision recorded with metric: MET (KEEP, 21 vs 23 within the ±2
+   comparison contract between the two full runs).
 
 ### Deviations from the goal text (for Matt, open)
 

@@ -7,9 +7,11 @@ telemetry JSONL. Fabricated DBs only.
 from __future__ import annotations
 
 import json
+import sqlite3
 
 import pytest
-from test_runner import build_corpus  # tests-dir sibling
+from test_corpus import add_thread  # tests-dir sibling
+from test_runner import build_corpus
 
 from terrarium_annotator.corpus import CorpusReader
 from terrarium_annotator.glossary import Evidence, GlossaryStore, Provenance
@@ -126,6 +128,49 @@ class TestCoverage:
             conn, pairs, entry_thread_filter={101, 102}
         )
         assert covered_prefix == [] and missed_prefix == [("culture", "aghtaki")]
+
+    def test_thread_filter_excludes_alias_foresight(self, tmp_path):
+        """Alias-only match from a later thread must also be excluded —
+        the alias join is a distinct contamination path."""
+        corpus_path = tmp_path / "corpus.db"
+        build_corpus(corpus_path)
+        # Fixture-local late thread holding the entry + alias evidence.
+        cdb = sqlite3.connect(corpus_path)
+        add_thread(
+            cdb,
+            104,
+            "thread 104",
+            [
+                (4001, 4000, "Aghtaki bandits appeared.", ["story_post"]),
+                (
+                    4002,
+                    4010,
+                    "The Aghtaki, called Vasra by locals, left.",
+                    ["story_post"],
+                ),
+            ],
+        )
+        cdb.close()
+        corpus = CorpusReader(corpus_path)
+        conn = connect_annotator_db(tmp_path / "v.db")
+        store = GlossaryStore(conn, corpus.post_body)
+        eid = store.propose_entry(
+            term="Aghtaki",
+            gloss="Bandits.",
+            evidence=[Evidence(4001, "Aghtaki bandits appeared.")],
+            provenance=Provenance(thread_id=104, pass_id="t"),
+        )
+        store.add_alias(
+            eid.id,
+            "Vasra",
+            evidence=Evidence(4002, "called Vasra by locals"),
+            thread_id=104,
+        )
+        pairs = {("characters", "vasra")}
+        covered_all, _ = surface_coverage(conn, pairs)
+        assert covered_all == [("characters", "vasra")]
+        covered_prefix, _ = surface_coverage(conn, pairs, entry_thread_filter={101})
+        assert covered_prefix == []
 
 
 class TestScorecard:
