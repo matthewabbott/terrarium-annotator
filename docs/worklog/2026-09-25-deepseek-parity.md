@@ -321,9 +321,10 @@ Remote verified at 796495c before launch.
    32205261:4 (391 batches) and resumable with rolling flags if Matt
    prefers the banked progress (one command; mode change recorded at
    thread 31).
-2. **Cap variants (250k/300k) skipped as no-ops by construction**: the
-   200k cap never bound on the 40-thread run (peak 136k tokens), so
-   bigger caps produce identical runs. The informative experiments are
+2. **Cap variants (250k/300k) skipped**: the 200k cap never bound on the
+   40-thread run (peak 136k tokens), so the cap logic would not engage
+   and the variants cannot isolate a cap effect (runs remain stochastic
+   regardless — "identical" would overclaim). The informative experiments
    instead: a SMALLER window (100k) to measure drop cost, or a dense
    slice that pushes past 200k to exercise enforcement at scale.
    Recorded; not run pending Matt's interest.
