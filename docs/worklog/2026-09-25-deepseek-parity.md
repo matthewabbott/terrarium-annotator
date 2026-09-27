@@ -386,7 +386,9 @@ metric: coverage vs the min-5 baseline on the overlapping prefix is
 within the ±2-pair tolerance (21 vs 23) — the goal's comparison
 contract. The −4 gap vs the slice arm is noted honestly: different
 process, uncontrolled stochasticity, and that arm ran at min-5 with no
-the comparison lineage; its data stays regardless.
+trims. Trim mechanics proven in production: the first breach trimmed
+cleanly below the 150k target. The baseline min-5 run continues to
+completion as the comparison lineage; its data stays regardless.
 
 ### Deviations from the goal text (for Matt, open)
 
