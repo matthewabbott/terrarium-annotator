@@ -333,6 +333,13 @@ Full-quest tuned run follows: window 200k, min_threads 7, trim target
 150k (Matt's 100–150k range; chosen for fewer trims at negligible
 re-prefill cost — ~30s per trim at ~5,700 tok/s prompt e2e).
 
+Tuned full-quest run launched (2026-09-27 ~14:50 UTC):
+`full-rolling-v2` on data/deepseek-rolling-full-v2.db — window 200k,
+min_threads 7, trim target 150k, reader-v1, Deepseek. Fresh from thread
+1 (min-5 baseline `full-rolling` keeps running on the second sequence
+slot — both were advancing at +15m: v2 at thread 30305969 batch 12,
+baseline at thread 30665078 batch 16).
+
 ### Deviations from the goal text (for Matt, open)
 
 1. **Full run launched FRESH, not from the thread-30 checkpoint**
