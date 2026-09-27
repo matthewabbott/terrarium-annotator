@@ -6,6 +6,7 @@ ScriptedModel only.
 
 from __future__ import annotations
 
+import pytest
 from test_runner import build_corpus, make_runner  # tests-dir siblings
 
 from terrarium_annotator.llm import ChatResponse, ScriptedModel, ToolCall
@@ -112,6 +113,25 @@ class TestResumeRebuild:
         assert len(runner2._messages) > 1  # rebuilt history + new batch
         roles = [m["role"] for m in runner2._messages]
         assert "assistant" in roles and "user" in roles
+
+
+class TestConfigValidation:
+    def test_zero_window_rejected(self):
+        from terrarium_annotator.runner import RunnerConfig
+
+        with pytest.raises(ValueError, match="positive"):
+            RunnerConfig(rolling_window_tokens=0)
+
+    def test_zero_min_threads_rejected(self):
+        from terrarium_annotator.runner import RunnerConfig
+
+        with pytest.raises(ValueError, match=">= 1"):
+            RunnerConfig(rolling_window_tokens=100, rolling_min_threads=0)
+
+    def test_reset_mode_unaffected(self):
+        from terrarium_annotator.runner import RunnerConfig
+
+        RunnerConfig()  # rolling off: no validation triggered
 
 
 class TestCliFlags:

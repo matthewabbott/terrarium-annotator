@@ -65,6 +65,13 @@ def count_tokens(text: str) -> int:
 
 @dataclass
 class RunnerConfig:
+    def __post_init__(self) -> None:
+        if self.rolling_window_tokens is not None:
+            if self.rolling_window_tokens < 1:
+                raise ValueError("rolling_window_tokens must be positive when set")
+            if self.rolling_min_threads < 1:
+                raise ValueError("rolling_min_threads must be >= 1")
+
     batch_size: int = DEFAULT_BATCH_SIZE
     context_tokens: int = 262_144
     card_budget_fraction: float = 0.15
