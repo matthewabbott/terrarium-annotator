@@ -324,10 +324,23 @@ Both verify exit 0. Trim sawtooth confirmed in telemetry (breaches at
 | entries/1k | 230.5 | 337.7 |
 | flag rate | 28.2% | 40.4% |
 
-Identical coverage → the coverage drop vs rolling-v1 (25/52) is the
-WINDOW SIZE (100k vs 200k), not trim mechanics. Hysteresis loses nothing
-while firing fewer, bigger trims (the design intent). Window size drives
-quality — supporting the aim-200k direction.
+Read carefully: NO observed gold-recall difference between the arms in
+this small paired slice — that is all equal 19/52 shows. Density and
+flag rate differ sharply (71 vs 104 entries), so precision/texture may
+differ without recall moving. Texture adjudication of both arms (run
+2026-09-27, stratified samples, same keep-bias, Deepseek adjudicator):
+hyst 0/20 texture, ctrl 1/30 ("rolling green hills" — generic scenery).
+No texture regression on either arm; the density difference is
+borderline-valid volume, not junk — consistent with the parity-arm
+adjudication's 16.7%. Causal attribution to
+window size is PROVISIONAL: the arms differ from rolling-v1 in window
+size AND ran under concurrent load (the full run shared the box), and
+model stochasticity is uncontrolled at n=1 per config.
+
+Calibration note: max observed window was 102,218 provider tokens
+against the 100k budget — chars/4 slightly undercounts vs the provider
+tokenizer. Treat the cap as approximate (a few % slack) until a
+true-token proxy exists.
 
 Full-quest tuned run follows: window 200k, min_threads 7, trim target
 150k (Matt's 100–150k range; chosen for fewer trims at negligible
