@@ -328,3 +328,21 @@ Remote verified at 796495c before launch.
    instead: a SMALLER window (100k) to measure drop cost, or a dense
    slice that pushes past 200k to exercise enforcement at scale.
    Recorded; not run pending Matt's interest.
+
+### Matt's decisions (2026-09-27, resolving the open deviations)
+
+1. **Fresh rolling run CONFIRMED** (deviation item 1 resolved): keep the
+   fresh big-context run; the reset-mode thread-30 checkpoint stays as
+   artifact, never resumed. deepseek-full.db remains read-only.
+2. **Context targets**: aim for 200k window (current budget); discard
+   300k (context-rot hearsay at 300k). The 200k budget never filled
+   naturally (peak 136k on t1-40) — filling it means a HIGHER
+   rolling_min_threads on a future run, not a bigger budget.
+3. **Trim hysteresis idea** (Matt): on hitting the 200k cap, trim back
+   to ~150k rather than just-under-200k — the first call after a trim
+   cache-misses the whole prefix, so bigger trims amortize the miss
+   over more subsequent hits. Implementation judgment/benchmark left
+   open; current whole-thread drops already drop until under budget.
+4. **Let the run truck for days** unless space balloons; kimi quota
+   pacing is just a speed limit — Deepseek's unlimited tokens make it
+   moot for project workloads.
