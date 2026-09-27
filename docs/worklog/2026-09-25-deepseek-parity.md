@@ -300,3 +300,7 @@ costs less wall-clock per thread. The full-quest run launches fresh
 (rolling from thread 1 — the banked reset-mode run at thread 30 stays
 as the reset-mode artifact; mixing modes mid-DB would muddy the
 comparison). Supervised checkpointed process: data/deepseek-rolling-full.db.
+
+Launch evidence (2026-09-27 ~11:00 UTC): `full-rolling` healthy at 10
+minutes — thread 30305969 batch 13, 18 batches, 43 entries, advancing.
+Remote verified at 796495c before launch.
