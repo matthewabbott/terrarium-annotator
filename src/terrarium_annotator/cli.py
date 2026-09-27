@@ -147,6 +147,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Sampling temperature (default: 0.4; use the served model's "
         "official default for parity arms)",
     )
+    run.add_argument(
+        "--rolling-window-tokens",
+        type=int,
+        default=None,
+        help="Rolling-context mode: persistent conversation with a token "
+        "budget (default OFF = reset mode). Whole threads drop at close "
+        "when over budget; digest covers dropped threads.",
+    )
+    run.add_argument(
+        "--rolling-min-threads",
+        type=int,
+        default=5,
+        help="Rolling mode: never drop below this many threads in window",
+    )
     add_provider_args(run)
 
     chat = sub.add_parser(
@@ -295,6 +309,8 @@ def run_pass(
                 args.context_tokens if args.context_tokens is not None else 262144
             ),
             temperature=args.temperature if args.temperature is not None else 0.4,
+            rolling_window_tokens=args.rolling_window_tokens,
+            rolling_min_threads=args.rolling_min_threads,
         ),
         telemetry=instrumented,
         quota_check=quota_check_factory(args.quota_breaker),

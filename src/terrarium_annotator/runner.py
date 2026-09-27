@@ -76,6 +76,8 @@ class RunnerConfig:
     quota_threshold: float | None = 0.50  # weekly-window breaker; <=0 disables
     prompt_file: str | None = None  # prompts/<variant>.md; None = default
     temperature: float = 0.4  # sampling; set to the model's official default
+    rolling_window_tokens: int | None = None  # None = reset mode (default)
+    rolling_min_threads: int = 5  # window never drops below this many threads
 
 
 class Runner:
@@ -113,6 +115,13 @@ class Runner:
             if self.config.prompt_file
             else DEFAULT_PROMPT_PATH.stem
         )
+        # Rolling-context state (reset mode: both stay unused). The window
+        # is a persistent conversation spanning whole threads; spans track
+        # per-thread message ranges for boundary drops.
+        self._messages: list[dict] | None = None
+        self._thread_spans: list[tuple[int, int, int]] = []
+        self._span_open: int | None = None
+        self._span_thread: int | None = None
         self._provenance: Provenance | None = None
         self.dispatcher = ToolDispatcher(
             glossary,
@@ -165,6 +174,8 @@ class Runner:
                 return  # checkpoint past the final thread: nothing to do
             resume_idx, resume_batch = matches[0], resume[1]
 
+        if self.config.rolling_window_tokens is not None and resume is not None:
+            self._rebuild_window(threads[:resume_idx])
         processed = 0
         for ti, thread in enumerate(threads):
             if ti < resume_idx:
@@ -182,6 +193,9 @@ class Runner:
                 if max_batches is not None and processed >= max_batches:
                     return
             self.memory.close_thread(thread.id)
+            if self.config.rolling_window_tokens is not None:
+                self._close_span(thread.id)
+                self._enforce_window()
             self._settle_merges()
 
     def _process_batch(self, thread: Thread, batch: Batch) -> None:
@@ -245,10 +259,21 @@ class Runner:
             + scene_text
             + "\n</batch>"
         )
-        messages = [
-            {"role": "system", "content": self.system_prompt},
-            {"role": "user", "content": user},
-        ]
+        if cfg.rolling_window_tokens is not None:
+            # Rolling mode: append to the persistent conversation; a new
+            # thread's first message opens its drop-span.
+            if self._messages is None:
+                self._messages = [{"role": "system", "content": self.system_prompt}]
+            if self._span_open is None:
+                self._span_open = len(self._messages)
+                self._span_thread = thread.id
+            self._messages.append({"role": "user", "content": user})
+            messages = self._messages
+        else:
+            messages = [
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": user},
+            ]
         record_transcript(
             self.conn,
             pass_id=cfg.pass_id,
@@ -293,9 +318,77 @@ class Runner:
                 )
             response = self._chat(messages)
 
+        # The final reply belongs to the conversation too (rolling mode
+        # carries it into the next batch; reset mode discards the list).
+        messages.append({"role": "assistant", "content": response.content or ""})
         gist = self._gist_from(response, thread, batch)
         self.memory.append(thread.id, gist, batch_lo=batch.index, batch_hi=batch.index)
         self._record(thread, batch, seq, "assistant", response)
+
+    # ---- rolling-context mode (active when rolling_window_tokens set) ----
+
+    def _window_tokens(self) -> int:
+        """chars/4 estimate over the FULL message list (assistant turns
+        and tool results included — the window budget counts everything)."""
+        total = 0
+        for m in self._messages or []:
+            total += len(m.get("content") or "")
+            if m.get("tool_calls"):
+                total += len(json.dumps(m["tool_calls"]))
+        return max(1, total // 4)
+
+    def _close_span(self, thread_id: int) -> None:
+        if self._span_open is not None and self._messages is not None:
+            self._thread_spans.append(
+                (self._span_thread or thread_id, self._span_open, len(self._messages))
+            )
+        self._span_open = None
+        self._span_thread = None
+
+    def _enforce_window(self) -> None:
+        """Drop the oldest whole threads until under budget, never below
+        rolling_min_threads. Dropped threads stay covered by the digest
+        (their gists settle into the merge tree at close)."""
+        cfg = self.config
+        if self._messages is None:
+            return
+        while (
+            self._window_tokens() > cfg.rolling_window_tokens
+            and len(self._thread_spans) > cfg.rolling_min_threads
+        ):
+            _, start, end = self._thread_spans.pop(0)
+            del self._messages[start:end]
+            delta = end - start
+            self._thread_spans = [
+                (t, s - delta, e - delta) for t, s, e in self._thread_spans
+            ]
+            if self._span_open is not None:
+                self._span_open -= delta
+
+    def _rebuild_window(self, prior_threads: list) -> None:
+        """Resume: rebuild the in-window tail from transcripts of the
+        most recent completed threads (up to rolling_min_threads, trimmed
+        from the front to budget). Reset mode never calls this."""
+        cfg = self.config
+        tail = prior_threads[-cfg.rolling_min_threads :]
+        self._messages = [{"role": "system", "content": self.system_prompt}]
+        self._thread_spans = []
+        for thread in tail:
+            self._span_open = len(self._messages)
+            self._span_thread = thread.id
+            rows = self.conn.execute(
+                "SELECT role, content, tool_calls FROM transcript "
+                "WHERE pass_id = ? AND thread_id = ? AND role IN"
+                " ('user', 'assistant', 'tool') ORDER BY id",
+                (cfg.pass_id, thread.id),
+            ).fetchall()
+            for role, content, tool_calls in rows:
+                msg: dict = {"role": role, "content": content or ""}
+                if tool_calls:
+                    msg["tool_calls"] = json.loads(tool_calls)
+                self._messages.append(msg)
+            self._close_span(thread.id)
+        self._enforce_window()
 
     def _chat(self, messages: list[dict]) -> ChatResponse:
         try:
