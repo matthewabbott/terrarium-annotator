@@ -12,7 +12,7 @@ from test_runner import build_corpus, make_runner  # tests-dir siblings
 from terrarium_annotator.llm import ChatResponse, ScriptedModel, ToolCall
 
 
-def make_rolling(corpus_path, annotator_path, script, window=200, min_threads=2):
+def make_rolling(corpus_path, annotator_path, script, window=50_000, min_threads=2):
     return make_runner(
         corpus_path,
         annotator_path,
@@ -53,26 +53,25 @@ class TestWindowEnforcement:
         corpus_path = tmp_path / "corpus.db"
         build_corpus(corpus_path)
         script = [ChatResponse(content="gist") for _ in range(20)]
-        # Tiny window forces drops after each thread close.
+        # Window fits one batch (~520 tokens) but not two threads' worth.
         runner, _ = make_rolling(
-            corpus_path, tmp_path / "a.db", script, window=50, min_threads=1
+            corpus_path, tmp_path / "a.db", script, window=800, min_threads=1
         )
         runner.run(max_batches=3)  # thread 101: 2 batches, then close
-        spans = runner._thread_spans
-        # Thread 101 closed and was dropped when over budget (min_threads=1
-        # lets the span list hold only the current open span's predecessors).
-        assert all(end - start >= 0 for _, start, end in spans)
-        assert runner._window_tokens() > 0
+        # No config error raised; enforcement kept the window under 800.
+        assert runner._window_tokens() <= 800
+        assert runner._messages[0]["role"] == "system"
 
     def test_min_threads_floor_respected(self, tmp_path):
         corpus_path = tmp_path / "corpus.db"
         build_corpus(corpus_path)
         script = [ChatResponse(content="gist") for _ in range(20)]
         runner, _ = make_rolling(
-            corpus_path, tmp_path / "a.db", script, window=50, min_threads=2
+            corpus_path, tmp_path / "a.db", script, window=800, min_threads=2
         )
         runner.run(max_batches=3)  # closes thread 101
-        # With floor 2, enforcement cannot drop the only closed span.
+        # Window under budget (floor yields to the cap when needed).
+        assert runner._window_tokens() <= 800
         assert len(runner._thread_spans) <= 2
 
     def test_window_budget_counts_tool_results(self, tmp_path):
@@ -113,6 +112,92 @@ class TestResumeRebuild:
         assert len(runner2._messages) > 1  # rebuilt history + new batch
         roles = [m["role"] for m in runner2._messages]
         assert "assistant" in roles and "user" in roles
+
+
+class TestEnforcementIndexes:
+    def _runner_with_spans(self, tmp_path):
+        corpus_path = tmp_path / "corpus.db"
+        build_corpus(corpus_path)
+        runner, _ = make_rolling(corpus_path, tmp_path / "a.db", [])
+        # Fabricate: system + two closed spans + one open span with an
+        # in-flight batch tail. Each message ~400 chars (~100 tokens).
+        runner._messages = [{"role": "system", "content": "s" * 100}]
+        for t in (101, 102):  # closed spans: 3 messages each
+            start = len(runner._messages)
+            for _ in range(3):
+                runner._messages.append({"role": "user", "content": "x" * 400})
+            runner._thread_spans.append((t, start, len(runner._messages)))
+        runner._span_open = len(runner._messages)  # open span: thread 103
+        runner._span_thread = 103
+        for _ in range(3):
+            runner._messages.append({"role": "user", "content": "y" * 400})
+        runner._batch_open = len(runner._messages)  # in-flight batch
+        runner._messages.append({"role": "user", "content": "z" * 400})
+        return runner
+
+    def test_closed_spans_drop_fully_when_over_cap(self, tmp_path):
+        runner = self._runner_with_spans(tmp_path)
+        runner.config.rolling_window_tokens = 150  # ~600 chars
+        runner._enforce_window()
+        # Both closed spans dropped (floor yields); open span truncated to
+        # the in-flight batch; system message preserved at index 0.
+        assert runner._messages[0]["role"] == "system"
+        assert runner._thread_spans == []
+        assert all(m["content"].startswith("z") for m in runner._messages[1:])
+
+    def test_open_span_truncates_after_closed_spans_drop(self, tmp_path):
+        runner = self._runner_with_spans(tmp_path)
+        # Budget 600 tokens (~2400 chars): over budget initially (4100
+        # chars ≈ 1025 tok) → first closed span drops (2900 chars ≈ 725
+        # tok, still over) → second drops (1700 ≈ 425 tok, fits). Both
+        # closed spans drop fully; no open-span truncation needed.
+        # Invariants: system survives, in-flight batch survives, under
+        # budget, order preserved.
+        runner.config.rolling_window_tokens = 600
+        runner._enforce_window()
+        contents = [m["content"][0] for m in runner._messages[1:]]
+        assert runner._messages[0]["role"] == "system"
+        assert "x" not in contents  # closed spans dropped fully
+        assert contents[-1] == "z"  # in-flight batch survives
+        assert runner._window_tokens() <= 600
+
+    def test_open_span_truncates_oldest_first(self, tmp_path):
+        corpus_path = tmp_path / "corpus.db"
+        build_corpus(corpus_path)
+        runner, _ = make_rolling(corpus_path, tmp_path / "a.db", [])
+        # No closed spans: system + 3 old open-span messages + in-flight
+        # tail. Truncation must remove from the open span's FRONT.
+        runner._messages = [{"role": "system", "content": "s" * 100}]
+        runner._span_open = 1
+        runner._span_thread = 101
+        for marker in ("a", "b", "c"):
+            runner._messages.append({"role": "user", "content": marker * 400})
+        runner._batch_open = len(runner._messages)
+        runner._messages.append({"role": "user", "content": "z" * 400})
+        # 100 + 1200 + 400 = 1700 chars ≈ 425 tokens; budget 300 → drop a, b.
+        runner.config.rolling_window_tokens = 300
+        runner._enforce_window()
+        contents = [m["content"][0] for m in runner._messages[1:]]
+        assert contents == ["c", "z"]  # oldest-first within the open span
+        assert runner._window_tokens() <= 300
+
+    def test_inflight_batch_over_budget_raises_locally(self, tmp_path):
+        from terrarium_annotator.llm import ChatClientError
+        from terrarium_annotator.state import load_run_state
+
+        corpus_path = tmp_path / "corpus.db"
+        build_corpus(corpus_path)
+        runner, conn = make_rolling(
+            corpus_path,
+            tmp_path / "a.db",
+            [ChatResponse(content="g")],
+            window=10,  # 40 chars — one batch's system+user exceeds it
+            min_threads=1,
+        )
+        with pytest.raises(ChatClientError, match="single"):
+            runner.run(max_batches=1)
+        # Checkpoint untouched: the batch is re-attempted on resume.
+        assert load_run_state(conn, "test-pass") is None
 
 
 class TestConfigValidation:

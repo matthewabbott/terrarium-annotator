@@ -122,6 +122,7 @@ class Runner:
             if self.config.prompt_file
             else DEFAULT_PROMPT_PATH.stem
         )
+        self._batch_open: int | None = None
         # Rolling-context state (reset mode: both stay unused). The window
         # is a persistent conversation spanning whole threads; spans track
         # per-thread message ranges for boundary drops.
@@ -274,6 +275,7 @@ class Runner:
             if self._span_open is None:
                 self._span_open = len(self._messages)
                 self._span_thread = thread.id
+            self._batch_open = len(self._messages)  # in-flight batch starts here
             self._messages.append({"role": "user", "content": user})
             messages = self._messages
         else:
@@ -290,6 +292,8 @@ class Runner:
             role="user",
             content=user,
         )
+        if cfg.rolling_window_tokens is not None:
+            self._enforce_window()
 
         response = self._chat(messages)
         rounds = 0
@@ -323,6 +327,8 @@ class Runner:
                         "tool_call_id": call.id,
                     }
                 )
+            if cfg.rolling_window_tokens is not None:
+                self._enforce_window()
             response = self._chat(messages)
 
         # The final reply belongs to the conversation too (rolling mode
@@ -352,25 +358,63 @@ class Runner:
         self._span_open = None
         self._span_thread = None
 
+    def _drop_oldest_span(self) -> None:
+        _, start, end = self._thread_spans.pop(0)
+        del self._messages[start:end]
+        delta = end - start
+        self._thread_spans = [
+            (t, s - delta, e - delta) for t, s, e in self._thread_spans
+        ]
+        if self._span_open is not None:
+            self._span_open -= delta
+        if self._batch_open is not None:
+            self._batch_open -= delta
+
     def _enforce_window(self) -> None:
-        """Drop the oldest whole threads until under budget, never below
-        rolling_min_threads. Dropped threads stay covered by the digest
-        (their gists settle into the merge tree at close)."""
+        """Keep the window under rolling_window_tokens — the budget is
+        AUTHORITATIVE. Observed 2026-09-27: min_threads=5 never enforced
+        before 5 closes, and 5 spans outgrew the server's 600k limit
+        (HTTP 400 at 598k real tokens). Policy: drop oldest closed spans
+        first (floor yields to the cap); if the CURRENT open span alone
+        is over budget, truncate its oldest messages (keeping system +
+        the in-flight batch's turns — the digest covers dropped content).
+        If one in-flight batch alone exceeds the budget, that's a config
+        error — proceed and let the server reject it (loud, recorded).
+        Called before EVERY chat call in rolling mode, not just at close.
+        """
         cfg = self.config
         if self._messages is None:
             return
-        while (
-            self._window_tokens() > cfg.rolling_window_tokens
-            and len(self._thread_spans) > cfg.rolling_min_threads
+        budget = cfg.rolling_window_tokens
+        while self._window_tokens() > budget and len(self._thread_spans) > max(
+            1, cfg.rolling_min_threads
         ):
-            _, start, end = self._thread_spans.pop(0)
-            del self._messages[start:end]
-            delta = end - start
-            self._thread_spans = [
-                (t, s - delta, e - delta) for t, s, e in self._thread_spans
-            ]
-            if self._span_open is not None:
-                self._span_open -= delta
+            self._drop_oldest_span()
+        while self._window_tokens() > budget and self._thread_spans:
+            self._drop_oldest_span()  # floor yields to the cap; the OPEN
+            # span (current thread) is never in _thread_spans, so it
+            # survives — only closed spans drop here.
+        # Open span alone over budget: truncate the current thread's
+        # OLDEST messages (at the span's actual start — never the system
+        # message at index 0, never the in-flight batch at/after
+        # _batch_open). The digest covers dropped content.
+        while (
+            self._window_tokens() > budget
+            and self._span_open is not None
+            and self._batch_open is not None
+            and self._span_open < self._batch_open
+        ):
+            del self._messages[self._span_open]
+            self._batch_open -= 1
+        # The in-flight batch alone must fit. If not, that's a config
+        # error — raise locally (checkpoint untouched, resume
+        # re-attempts) instead of paying the server for a 400.
+        if self._window_tokens() > budget:
+            raise ChatClientError(
+                f"rolling window over budget after enforcement: "
+                f"{self._window_tokens()} tokens > {budget} — a single "
+                f"in-flight batch exceeds rolling_window_tokens"
+            )
 
     def _rebuild_window(self, prior_threads: list) -> None:
         """Resume: rebuild the in-window tail from transcripts of the
