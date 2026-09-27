@@ -222,3 +222,35 @@ throughput is proven (32–34 tok/s sustained, ~2000 calls, 0 errors),
 memory held at the floor with peak context ~41k est tokens, and
 checkpointing is proven across all arms. Researcher tier lands after
 the full pass completes.
+
+## Rolling-context mode (2026-09-27)
+
+New runner mode (`--rolling-window-tokens`, default OFF): the per-batch
+user message appends to one persistent conversation; whole threads drop
+at close when the FULL message list (assistant turns + tool results)
+exceeds budget (200k tokens, min 5 threads); digest covers dropped
+threads. Commit 9adf093; 8 L0 tests; 263 passed.
+
+### Rolling arm, threads 1–5 (reader-v1) vs reset arms
+
+| metric | rolling-v1 | reset-v1 | reset-v2 | reset-v4 |
+|---|---|---|---|---|
+| gold exact (52) | **25 (48.1%)** | 22 | 25 | 24 |
+| entries | 69 | 120 | 359 | 169 |
+| entries/1k posts | 224 | 390 | 1166 | 549 |
+| flag rate | **27.5%** | 40.0% | 63.8% | 53.3% |
+| texture (adjudicated) | **0/19 = 0%** | 1/40 = 2.5% | 10/60 = 16.7% | 3/50 = 6.0% |
+| tool calls | 143 | 659 | 1869 | 906 |
+| wall | **37m** | 1h00m | 3h20m | 2h22m |
+| cache-hit rate | **98.3%** | ~85% | 85.6% | ~85% |
+
+The rolling agent sees its own prior reasoning and, ON THIS SLICE,
+admitted less (fewest entries, lowest flag rate) while tying best
+coverage. Texture caveat: 0/19 is a small, keep-biased sample — treat
+as "no texture found in n=19", not a true 0% rate. The 12.7M prompt
+tokens are 98.3% cache hits; fresh prefill ≈217k prompt tokens ≈ 8.7k
+per covered entity (PROMPT-side only — excludes 53k completion tokens
+and any cache-pricing difference; raw tokens/covered of 507k is
+cache-blind and must not be quoted alone).
+
+t1-40 comparison run launched (next section).
