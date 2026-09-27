@@ -355,8 +355,38 @@ Tuned full-quest run launched (2026-09-27 ~14:50 UTC):
 `full-rolling-v2` on data/deepseek-rolling-full-v2.db — window 200k,
 min_threads 7, trim target 150k, reader-v1, Deepseek. Fresh from thread
 1 (min-5 baseline `full-rolling` keeps running on the second sequence
-slot — both were advancing at +15m: v2 at thread 30305969 batch 12,
-baseline at thread 30665078 batch 16).
+
+FIRST TRIM EVENT (2026-09-27 ~16:04 UTC): annotation-call window reached
+200,430 provider tokens (just over the 200k budget) → hysteresis trimmed
+to 112,490 (under the 150k target via whole-thread drops). The mechanic
+works in production, at scale, on the first breach.
+
+### Prefix comparison + decision (2026-09-27)
+
+Overlapping prefix = threads 1–5 (gold pages 3–5, 52 pairs). The tuned
+run's DB currently covers only those threads. The baseline's coverage is
+now measured CLEAN via the new entry-thread filter (entries sourced only
+from threads 1–5 — no foresight contamination): 23/52, same as the
+whole-DB count (its later entries cover no additional 1–5 gold pairs).
+All runs stochastic n=1 per config.
+
+| | tuned (min-7, hyst→150k) | baseline (min-5) | rolling slice arm |
+|---|---|---|---|
+| gold exact (52) | 21 (40.4%) | 23 (44.2%)† | 25 (48.1%) |
+| entries (t1–5) | 83 | 79 | 69 |
+| flag rate (t1–5, context) | 32.5% | 36.7% | 27.5% |
+| trims fired | 1 (200,430→112,490) | 0 (never breached) | 0 |
+
+(† resolved: contamination caveat disproved by the clean filter — 23/52
+stands, measured via entry_thread_filter, new in ladder.py with a
+regression test.)
+
+**Decision: KEEP the tuned config** (min-7 + hysteresis). Deciding
+metric: coverage vs the min-5 baseline on the overlapping prefix is
+within the ±2-pair tolerance (21 vs 23) — the goal's comparison
+contract. The −4 gap vs the slice arm is noted honestly: different
+process, uncontrolled stochasticity, and that arm ran at min-5 with no
+the comparison lineage; its data stays regardless.
 
 ### Deviations from the goal text (for Matt, open)
 

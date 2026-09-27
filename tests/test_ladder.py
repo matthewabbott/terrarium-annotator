@@ -104,6 +104,29 @@ class TestCoverage:
         covered, _ = surface_coverage(conn, {("characters", "mik")})
         assert covered == [("characters", "mik")]
 
+    def test_thread_filter_excludes_foresight(self, tmp_path):
+        """Entries sourced only from later threads must not count toward
+        an earlier slice's prefix coverage (baseline contamination)."""
+        corpus_path = tmp_path / "corpus.db"
+        build_corpus(corpus_path)
+        corpus = CorpusReader(corpus_path)
+        conn = connect_annotator_db(tmp_path / "v.db")
+        store = GlossaryStore(conn, corpus.post_body)
+        # Entry sourced from thread 103 ONLY (late in the fixture corpus).
+        store.propose_entry(
+            term="Aghtaki",
+            gloss="Bandits.",
+            evidence=[Evidence(3001, "Aghtaki bandits appeared.")],
+            provenance=Provenance(thread_id=103, pass_id="t"),
+        )
+        pairs = {("culture", "aghtaki")}
+        covered_all, _ = surface_coverage(conn, pairs)
+        assert covered_all == [("culture", "aghtaki")]  # unfiltered sees it
+        covered_prefix, missed_prefix = surface_coverage(
+            conn, pairs, entry_thread_filter={101, 102}
+        )
+        assert covered_prefix == [] and missed_prefix == [("culture", "aghtaki")]
+
 
 class TestScorecard:
     def test_full_scorecard(self, variant_db, tmp_path):

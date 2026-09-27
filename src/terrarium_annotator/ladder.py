@@ -53,12 +53,37 @@ def gold_pairs_for_pages(
 
 
 def surface_coverage(
-    conn: sqlite3.Connection, in_scope: set[tuple[str, str]]
+    conn: sqlite3.Connection,
+    in_scope: set[tuple[str, str]],
+    entry_thread_filter: set[int] | None = None,
 ) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
-    """(covered, missed) pairs by exact normalized surface/alias match."""
-    surfaces = {r[0] for r in conn.execute("SELECT term_normalized FROM entry")} | {
-        r[0] for r in conn.execute("SELECT alias_normalized FROM entry_alias")
-    }
+    """(covered, missed) pairs by exact normalized surface/alias match.
+
+    entry_thread_filter: only entries with >=1 source in those threads
+    count — the knowable-by-cutoff bar for scoring a deep DB's PREFIX
+    without foresight contamination."""
+    if entry_thread_filter is not None:
+        marks = ",".join(str(int(t)) for t in entry_thread_filter)
+        surfaces = {
+            r[0]
+            for r in conn.execute(
+                "SELECT DISTINCT e.term_normalized FROM entry e "
+                "JOIN entry_source s ON s.entry_id = e.id "
+                f"WHERE s.thread_id IN ({marks})"
+            )
+        } | {
+            r[0]
+            for r in conn.execute(
+                "SELECT DISTINCT a.alias_normalized FROM entry_alias a "
+                "JOIN entry e ON e.id = a.entry_id "
+                "JOIN entry_source s ON s.entry_id = e.id "
+                f"WHERE s.thread_id IN ({marks})"
+            )
+        }
+    else:
+        surfaces = {r[0] for r in conn.execute("SELECT term_normalized FROM entry")} | {
+            r[0] for r in conn.execute("SELECT alias_normalized FROM entry_alias")
+        }
     covered = sorted(p for p in in_scope if _norm_slug(p[1]) in surfaces)
     missed = sorted(set(in_scope) - set(covered))
     return covered, missed
@@ -87,13 +112,16 @@ def scorecard(
     gold_set: dict,
     thread_ids: list[int],
     usage_path: str | Path | None = None,
+    entry_only: bool = False,
 ) -> dict:
     """One variant's scorecard. thread_ids are corpus thread IDs; gold
     pages are 1-based chronological ordinals of those threads."""
     order = [t.id for t in corpus.thread_order()]
     pages = {order.index(tid) + 1 for tid in thread_ids if tid in order}
     in_scope, out_of_scope = gold_pairs_for_pages(gold_set, pages)
-    covered, missed = surface_coverage(conn, in_scope)
+    covered, missed = surface_coverage(
+        conn, in_scope, entry_thread_filter=set(thread_ids) if entry_only else None
+    )
 
     entries = conn.execute("SELECT COUNT(*) FROM entry").fetchone()[0]
     deferred = conn.execute("SELECT COUNT(*) FROM deferred_candidate").fetchone()[0]
