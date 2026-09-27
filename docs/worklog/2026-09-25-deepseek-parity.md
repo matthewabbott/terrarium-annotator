@@ -342,6 +342,11 @@ against the 100k budget — chars/4 slightly undercounts vs the provider
 tokenizer. Treat the cap as approximate (a few % slack) until a
 true-token proxy exists.
 
+Trim-event detector correction: consecutive-CALL drops false-positive on
+merge-settle calls (tiny prompts after big annotation calls). The live
+monitor compares consecutive ANNOTATION calls only; a trim is an
+annotation call materially below the prior one after the window filled.
+
 Full-quest tuned run follows: window 200k, min_threads 7, trim target
 150k (Matt's 100–150k range; chosen for fewer trims at negligible
 re-prefill cost — ~30s per trim at ~5,700 tok/s prompt e2e).
