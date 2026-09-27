@@ -311,6 +311,28 @@ Launch evidence (2026-09-27 ~11:00 UTC): `full-rolling` healthy at 10
 minutes — thread 30305969 batch 13, 18 batches, 43 entries, advancing.
 Remote verified at 796495c before launch.
 
+### Hysteresis benchmark (2026-09-27)
+
+Two arms, threads 1–5, window 100k (sized to actually bind):
+`rolling-hyst` (trim target 75k) vs `rolling-hyst-ctrl` (trim-to-cap).
+Both verify exit 0. Trim sawtooth confirmed in telemetry (breaches at
+~85–102k trimmed to 55–66k).
+
+| | hyst (target 75k) | control (no target) |
+|---|---|---|
+| gold | 19/52 | 19/52 |
+| entries/1k | 230.5 | 337.7 |
+| flag rate | 28.2% | 40.4% |
+
+Identical coverage → the coverage drop vs rolling-v1 (25/52) is the
+WINDOW SIZE (100k vs 200k), not trim mechanics. Hysteresis loses nothing
+while firing fewer, bigger trims (the design intent). Window size drives
+quality — supporting the aim-200k direction.
+
+Full-quest tuned run follows: window 200k, min_threads 7, trim target
+150k (Matt's 100–150k range; chosen for fewer trims at negligible
+re-prefill cost — ~30s per trim at ~5,700 tok/s prompt e2e).
+
 ### Deviations from the goal text (for Matt, open)
 
 1. **Full run launched FRESH, not from the thread-30 checkpoint**
