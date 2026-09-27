@@ -295,12 +295,35 @@ unexercised at scale — watch for first real drop in the full run.
 
 Rolling beats the kimi t1-40 reference on coverage (71 vs 67) with no
 researcher pass, ties its own slice arm's cleanliness (0 texture found
-in n=19), shows no anchoring pathology on the clean comparison, and
-costs less wall-clock per thread. The full-quest run launches fresh
+in n=19), shows no anchoring pathology on the clean comparison, and ran
+the 40 threads in ~6h wall (kimi t1-40 wall is not comparable — it spanned
+quota windows; no per-thread wall claim is made). The full-quest run
+launches fresh
 (rolling from thread 1 — the banked reset-mode run at thread 30 stays
 as the reset-mode artifact; mixing modes mid-DB would muddy the
 comparison). Supervised checkpointed process: data/deepseek-rolling-full.db.
 
+Error accounting (per telemetry, both legs merged): 2 failed CALLS (the
+600k-overflow HTTP 400; the 3-attempt read-timeout), 5 retry attempts
+inside successful calls — 9 error attempts total, 1,262 successes.
+
 Launch evidence (2026-09-27 ~11:00 UTC): `full-rolling` healthy at 10
 minutes — thread 30305969 batch 13, 18 batches, 43 entries, advancing.
 Remote verified at 796495c before launch.
+
+### Deviations from the goal text (for Matt, open)
+
+1. **Full run launched FRESH, not from the thread-30 checkpoint**
+   (criterion 4's parenthetical). Rationale: mixing reset-written
+   entries (threads 1–30) with rolling-written ones in one glossary
+   muddies the comparison this work was for. Both paths preserved:
+   fresh rolling run continues; `data/deepseek-full.db` intact at
+   32205261:4 (391 batches) and resumable with rolling flags if Matt
+   prefers the banked progress (one command; mode change recorded at
+   thread 31).
+2. **Cap variants (250k/300k) skipped as no-ops by construction**: the
+   200k cap never bound on the 40-thread run (peak 136k tokens), so
+   bigger caps produce identical runs. The informative experiments are
+   instead: a SMALLER window (100k) to measure drop cost, or a dense
+   slice that pushes past 200k to exercise enforcement at scale.
+   Recorded; not run pending Matt's interest.
