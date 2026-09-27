@@ -254,3 +254,49 @@ and any cache-pricing difference; raw tokens/covered of 507k is
 cache-blind and must not be quoted alone).
 
 t1-40 comparison run launched (next section).
+
+### Rolling t1–40 comparison (2026-09-27)
+
+Full 40 threads (chronological 30265887…32266754), rolling 200k/min-5,
+reader-v1, Deepseek. One interruption: read-timeout at thread 7 (a
+~200k-context call exceeded the 300s default; resumed with --timeout
+900), then the 600k-overflow crash that produced the enforcement
+hardening (d4e3879); final leg clean. verify exit 0.
+
+| metric | rolling-t140 | kimi t1-40 baseline (reset, researcher-passed) |
+|---|---|---|
+| gold exact (216 pairs, pages 3–40) | **71 (32.9%)** | 67 (31%) post-researcher; 65 pre |
+| entries | 298 | 177 |
+| entries/1k posts | 151.9 | 90 |
+| flag rate (context) | 34.2% | 13% |
+| entries updated (revision>1) | 21% | 47% (researcher-inflated) |
+| aliases | 21 | 314 (researcher-harvested) |
+
+Anchoring metric (clean comparison, slice arms, no researcher pass):
+23% of entries revised under rolling vs 27% under reset — no anchoring
+signal. The t1-40 gap (21% vs 47%) is researcher-pass confounded.
+
+Slice-vs-40 consistency: rolling beat its own slice density (152/1k vs
+224/1k) while holding flag rate ~34% and covering 71/216 with NO
+researcher pass — the kimi baseline needed the researcher to reach 67.
+
+Cost honesty: 170M prompt tokens is 98%+ cache hits; decode 7.4 tok/s
+e2e aggregate over 9.15h of call time; the run's wall was ~6h including
+the crash leg. Fresh-prefill tokens are the real cost; not separately
+denominated here (usage-summary shows cached share per run).
+
+**The 200k window never filled** — peak context 136k tokens on 40
+threads; enforcement never fired in production. Cap variants (250k/300k)
+would change nothing on this corpus half; skipped WITH that evidence
+(goal criterion 5 conditional). The enforcement machinery is tested but
+unexercised at scale — watch for first real drop in the full run.
+
+### Verdict: SHIP rolling for the full quest
+
+Rolling beats the kimi t1-40 reference on coverage (71 vs 67) with no
+researcher pass, ties its own slice arm's cleanliness (0 texture found
+in n=19), shows no anchoring pathology on the clean comparison, and
+costs less wall-clock per thread. The full-quest run launches fresh
+(rolling from thread 1 — the banked reset-mode run at thread 30 stays
+as the reset-mode artifact; mixing modes mid-DB would muddy the
+comparison). Supervised checkpointed process: data/deepseek-rolling-full.db.
