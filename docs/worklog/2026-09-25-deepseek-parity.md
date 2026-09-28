@@ -458,3 +458,16 @@ its data stays regardless.
 4. **Let the run truck for days** unless space balloons; kimi quota
    pacing is just a speed limit — Deepseek's unlimited tokens make it
    moot for project workloads.
+
+### 2026-09-28 — tmux crash, resume, timeout deviation
+
+Both runs died ~05:50 UTC when Matt's tmux session crashed (children of
+that session). DBs passed integrity check; resumed detached (not
+tmux-bound) with exact configs from run_meta (pass IDs preserved — same
+passes continued, no new ones). Tuned run then failed on cold-resume:
+3x 300s HTTP read timeouts (likely full-window prefill contending with
+the baseline on the single endpoint — trace proves timeouts only, cause
+inferred). Relaunched with --timeout 1800: OPERATIONAL DEVIATION —
+run_meta does not record timeout, so this 6x margin lives only here.
+Checkpoint resumed at thread 32542209 batch 3; verified advancing (batch
+5 at 12:18:39 UTC) with fresh telemetry records.
