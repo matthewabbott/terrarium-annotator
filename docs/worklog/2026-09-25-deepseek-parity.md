@@ -471,3 +471,41 @@ inferred). Relaunched with --timeout 1800: OPERATIONAL DEVIATION —
 run_meta does not record timeout, so this 6x margin lives only here.
 Checkpoint resumed at thread 32542209 batch 3; verified advancing (batch
 5 at 12:18:39 UTC) with fresh telemetry records.
+
+### Full-run operations runbook (learned 2026-09-28..30, for future agents)
+
+**Resuming a stopped run** (checkpoints make this lossless modulo the
+in-flight batch):
+
+1. Read exact config from the DB's run_meta (`model`, `sampling`,
+   `config` JSON) — do NOT infer flags from worklog prose.
+2. `--pass-id` MUST match run_state's pass_id or the runner starts a
+   NEW pass instead of resuming.
+3. Use `--timeout 1800`, not the 300s default: cold-resume calls are
+   full ~200k-token prefills and (with two runs sharing one GPU) exceed
+   300s; the client retries 3x then exits 1. run_meta does NOT record
+   timeout — this margin lives only here.
+4. Launch detached (hub `op:start`, `detached: true`), NEVER as a tmux
+   child — a tmux crash killed both runs simultaneously on 2026-09-28.
+5. Verify recovery by a FRESH `run_state.updated_at` plus a new usage
+   JSONL record; empty stdout is normal (block-buffered when detached).
+   vLLM `/metrics` `num_requests_running` confirms calls in flight.
+
+**Failure modes observed**: tmux crash (both die together); cold-resume
+300s timeouts (exit 1); SIGTERM/exit 143 from a SIBLING agent session
+briefly freeing the GPU for other work (2026-09-30 — the sibling
+relaunched the run itself minutes later). Before relaunching anything,
+`ps aux | grep terrarium_annotator.cli` to avoid duplicate writers on
+the same SQLite DB.
+
+**Monitoring pattern**: `run_state.updated_at` freshness +
+chronological ordinal via banished.db thread order; pace ≈ 2.5-3
+threads/h/run sharing one GPU; both runs finish the 278-thread corpus
+in ~2.5-3.5 days from thread ~60. Trim-event detection: consecutive
+ANNOTATION-call prompt-token drops (merge-settle calls false-positive);
+the count is a heuristic, not instrumented.
+
+**2026-09-30 SIGTERM incident**: baseline killed (exit 143) at thread
+38613982 batch 6 ~05:41 UTC by the sibling session; it relaunched the
+run at 05:48 with the identical command. No action needed — but future
+agents seeing a 143 should check with Matt before assuming fault.

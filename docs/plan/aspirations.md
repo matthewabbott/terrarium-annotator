@@ -62,6 +62,26 @@ Evidence: docs/worklog/2026-09-13-telemetry.md.
 - **Failed/retry calls are first-class records**: every attempt (success or exception) logged with attempt number, status, and error type — the retry tax is a major cost component, not an afterthought.
 - **Stable identifiers**: each record carries a run ID and call-type label (annotation / merge-settle / chat / researcher) so per-call-type aggregation is actually possible. Context-component sizes are passed by the prompt assembler or marked `unknown` — no silent gaps.
 
+## Rolling-window trim tuning (Matt + session discussion, 2026-09-29)
+
+For future runs only — do NOT change mid-run:
+
+- **Deeper trim target** (e.g. 100k vs the current 150k on a 200k
+  budget): idealized steady-state re-prefill cost scales like
+  `target / (budget - target)`, so 100k is ~3x cheaper than 150k on
+  cache invalidations. Tradeoff: shorter recall horizon (fewer whole
+  threads retained; late-corpus threads are long, so the min_threads
+  floor may dominate). A/B it like the hysteresis benchmark before
+  adopting.
+- **Trim-time compaction**: a front-drop already invalidates the whole
+  cached prefix, so the trim moment is the ONLY cache-safe time to edit
+  retained spans. Rewrite them to strip tool-call transcripts (lookups,
+  upsert exchanges) while keeping posts + final assistant replies —
+  glossary knowledge survives via the DB + per-batch re-injection
+  regardless. Shrinks the post-trim window, so trims also fire less
+  often. Never edit mid-window outside a trim: any prefix mutation costs
+  a full re-prefill, so per-batch edits are strictly worse.
+
 ## Evaluating the t1–40 run (when it completes)
 
 - **Gold-coverage hard criterion** (Matt): the glossary should have an entry for *every* backlink in every published thread wiki page (218 unique entities across pages 3–40). Extra entries are fine — the bar is coverage, not exact match. Hardest class: books the protagonist reads — they look like texture but are inventory items with mechanical significance (reading grows the vys pool / teaches techniques). Consider a `book`/`document` tag prior boost during researcher passes.
